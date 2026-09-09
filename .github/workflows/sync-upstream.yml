@@ -27,17 +27,22 @@ jobs:
           git remote add upstream https://github.com/MorpheApp/morphe-desktop.git
           git fetch upstream --tags
 
-          # Prepare the upstream merge without committing it yet.
+          # Merge upstream without committing so fork-specific workflow files
+          # can be preserved in the merge commit.
           git merge upstream/main --no-edit --no-commit
 
           # Keep this fork's workflow files exactly as they were before the merge.
-          # Restore both the worktree and index from the pre-merge HEAD so the
-          # merge commit contains no workflow-file changes.
           git restore --source=HEAD --staged --worktree .github/workflows
 
-          # Commit the merge. The resulting tree contains the upstream changes,
-          # while .github/workflows remains identical to our fork's version.
+          # Remove workflow files that exist only on upstream and would otherwise
+          # make the tag push require the unavailable `workflows` permission.
+          git diff --name-only --diff-filter=A HEAD -- .github/workflows | while IFS= read -r file; do
+            git rm -f -- "$file"
+          done
+
           git commit -m "Merge upstream/main"
 
+          # The main branch can be pushed with contents:write. Do not push
+          # upstream tags: their target commits contain workflow changes and
+          # GitHub rejects those tag refs with the Actions token.
           git push origin main
-          git push origin --tags
