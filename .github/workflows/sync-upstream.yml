@@ -28,21 +28,24 @@ jobs:
           git fetch upstream --tags
 
           # Merge upstream without committing so fork-specific workflow files
-          # can be preserved in the merge commit.
+          # can be preserved in the merge result.
           git merge upstream/main --no-edit --no-commit
 
           # Keep this fork's workflow files exactly as they were before the merge.
           git restore --source=HEAD --staged --worktree .github/workflows
 
-          # Remove workflow files that exist only on upstream and would otherwise
-          # make the tag push require the unavailable `workflows` permission.
+          # Remove workflow files that exist only on upstream.
           git diff --name-only --diff-filter=A HEAD -- .github/workflows | while IFS= read -r file; do
             git rm -f -- "$file"
           done
 
+          # If upstream is already fully synchronized (or the merge produced no
+          # remaining changes after preserving workflows), there is nothing to commit.
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "Already up to date. Nothing to commit."
+            exit 0
+          fi
+
           git commit -m "Merge upstream/main"
 
-          # The main branch can be pushed with contents:write. Do not push
-          # upstream tags: their target commits contain workflow changes and
-          # GitHub rejects those tag refs with the Actions token.
           git push origin main
