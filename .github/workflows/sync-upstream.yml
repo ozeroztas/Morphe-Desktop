@@ -27,5 +27,11 @@ jobs:
 
           git merge upstream/main --no-edit
 
+          # Keep fork-owned GitHub Actions workflows local.
+          # The default GITHUB_TOKEN cannot push changes to workflow files.
+          git checkout HEAD -- .github/workflows
+          git add .github/workflows
+          git commit --amend --no-edit
+
           git push origin main
           git push origin --tags
