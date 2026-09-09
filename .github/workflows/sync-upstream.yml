@@ -19,19 +19,25 @@ jobs:
 
       - name: Sync Morphe Desktop
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git remote add upstream https://github.com/MorpheApp/morphe-desktop.git
           git fetch upstream --tags
 
-          git merge upstream/main --no-edit
+          # Prepare the upstream merge without committing it yet.
+          git merge upstream/main --no-edit --no-commit
 
-          # Keep fork-owned GitHub Actions workflows local.
-          # The default GITHUB_TOKEN cannot push changes to workflow files.
-          git checkout HEAD -- .github/workflows
-          git add .github/workflows
-          git commit --amend --no-edit
+          # Keep this fork's workflow files exactly as they were before the merge.
+          # Restore both the worktree and index from the pre-merge HEAD so the
+          # merge commit contains no workflow-file changes.
+          git restore --source=HEAD --staged --worktree .github/workflows
+
+          # Commit the merge. The resulting tree contains the upstream changes,
+          # while .github/workflows remains identical to our fork's version.
+          git commit -m "Merge upstream/main"
 
           git push origin main
           git push origin --tags
