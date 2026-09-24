@@ -6,6 +6,8 @@
 package app.morphe.gui.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +17,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -39,8 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -57,6 +58,9 @@ import app.morphe.gui.ui.icons.MorpheIcons
 import app.morphe.gui.ui.theme.LocalMorpheAccents
 import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalMorpheFont
+import app.morphe.gui.ui.theme.panelFill
+import app.morphe.morphe_desktop.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
 
 /** One entry in a [MorpheDropdown]. */
 data class MorpheDropdownItem(val label: String, val onClick: () -> Unit)
@@ -81,21 +85,23 @@ fun MorpheDropdown(
     val density = LocalDensity.current
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    val listScroll = rememberScrollState()
     var triggerWidth by remember { mutableStateOf(0) }
     var triggerHeight by remember { mutableStateOf(0) }
 
     Box(modifier) {
         Row(
             Modifier.fillMaxWidth().clip(corner)
+                .background(panelFill)
                 .border(1.dp, accents.primary.copy(alpha = if (expanded) 0.6f else 0.3f), corner)
                 .onGloballyPositioned { triggerWidth = it.size.width; triggerHeight = it.size.height }
                 .clickable(enabled = enabled) { expanded = !expanded; query = "" }
-                .pointerHoverIcon(PointerIcon.Hand)
+                .handCursor()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                label, fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 13.sp,
+                label, fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -119,23 +125,39 @@ fun MorpheDropdown(
                 ) {
                     Column {
                         if (searchable) SearchField(query, font, accents.primary) { query = it }
-                        Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
-                            if (shown.isEmpty()) {
-                                Text("No matches", fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(10.dp))
+                        Box(Modifier.heightIn(max = maxHeight)) {
+                            Column(Modifier.verticalScroll(listScroll)) {
+                                if (shown.isEmpty()) {
+                                    Text(stringResource(Res.string.no_matches), fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(10.dp))
+                                }
+                                shown.forEach { item ->
+                                    val hover = remember { MutableInteractionSource() }
+                                    val isHovered by hover.collectIsHoveredAsState()
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .background(if (isHovered) accents.primary.copy(alpha = 0.14f) else Color.Transparent)
+                                            .hoverable(hover)
+                                            .handCursor()
+                                            .clickable { item.onClick(); expanded = false }
+                                            .padding(
+                                                start = 10.dp,
+                                                end = if (listScroll.maxValue > 0) 14.dp else 10.dp,
+                                                top = 7.dp,
+                                                bottom = 7.dp,
+                                            ),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(item.label, fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = if (isHovered) accents.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
                             }
-                            shown.forEach { item ->
-                                val hover = remember { MutableInteractionSource() }
-                                val isHovered by hover.collectIsHoveredAsState()
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .background(if (isHovered) accents.primary.copy(alpha = 0.14f) else Color.Transparent)
-                                        .hoverable(hover)
-                                        .pointerHoverIcon(PointerIcon.Hand)
-                                        .clickable { item.onClick(); expanded = false }
-                                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(item.label, fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = if (isHovered) accents.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (listScroll.maxValue > 0) {
+                                Box(Modifier.matchParentSize()) {
+                                    VerticalScrollbar(
+                                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                        adapter = rememberScrollbarAdapter(listScroll),
+                                        style = morpheScrollbarStyle(),
+                                    )
                                 }
                             }
                         }
@@ -153,8 +175,8 @@ private fun SearchField(query: String, font: FontFamily, accent: Color, onChange
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(MorpheIcons.Search, contentDescription = null, tint = accent.copy(alpha = 0.6f), modifier = Modifier.size(13.dp))
-        Box(Modifier.weight(1f).padding(start = 6.dp)) {
-            if (query.isEmpty()) Text("Search…", fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+        Box(Modifier.weight(1f).padding(start = 6.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) Text(stringResource(Res.string.dropdown_search_placeholder), fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             BasicTextField(
                 value = query,
                 onValueChange = onChange,

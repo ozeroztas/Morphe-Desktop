@@ -5,27 +5,19 @@
 
 package app.morphe.gui.ui.components
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.morphe.engine.patches.PatchProvider
@@ -40,9 +32,11 @@ import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.MorpheAccentColors
 import app.morphe.gui.ui.theme.MorpheCornerStyle
 import app.morphe.gui.util.MorpheFilePicker
+import app.morphe.morphe_desktop.generated.resources.*
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 
 @Composable
@@ -71,13 +65,11 @@ internal fun AddPatchSourceDialog(
         lastLocalPatchDir = cfg.lastLocalPatchDir
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(corners.medium),
-        containerColor = MaterialTheme.colorScheme.surface,
+    MorpheAlertDialog(
+        onDismiss = onDismiss,
         title = {
             Text(
-                "Add source",
+                stringResource(Res.string.add_source),
                 fontFamily = font,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp
@@ -105,32 +97,33 @@ internal fun AddPatchSourceDialog(
                                     else Color.Transparent
                                 )
                                 .clickable { sourceType = type }
+                                .handCursor()
                                 .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = when (type) {
                                     // The "REMOTE" tab covers both GitHub and
-                                    // GitLab — the resolver picks the right
+                                    // GitLab, and the resolver picks the right
                                     // provider from the URL the user pastes.
-                                    PatchSourceType.GITHUB -> "Remote"
-                                    PatchSourceType.LOCAL -> "Local file"
+                                    PatchSourceType.GITHUB -> stringResource(Res.string.source_sheet_remote_label)
+                                    PatchSourceType.LOCAL -> stringResource(Res.string.patch_source_dialog_local_file_label)
                                     else -> ""
                                 },
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 fontFamily = font,
                                 color = if (isSelected) accents.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
-                LabeledField(label = "Name", font = font) {
+                LabeledField(label = stringResource(Res.string.patch_source_dialog_name_label), font = font) {
                     SlimTextField(
                         value = name,
                         onValueChange = { name = it; error = null },
-                        placeholder = "My Custom Patches",
+                        placeholder = stringResource(Res.string.patch_source_dialog_name_placeholder),
                         font = font,
                         accents = accents,
                         corners = corners,
@@ -140,7 +133,7 @@ internal fun AddPatchSourceDialog(
 
                 when (sourceType) {
                     PatchSourceType.GITHUB -> {
-                        LabeledField(label = "Repository URL", font = font) {
+                        LabeledField(label = stringResource(Res.string.patch_source_dialog_repo_url_label), font = font) {
                             SlimTextField(
                                 value = url,
                                 onValueChange = { newUrl ->
@@ -153,47 +146,50 @@ internal fun AddPatchSourceDialog(
                                         suggestNameFromUrl(newUrl)?.let { name = it }
                                     }
                                 },
-                                placeholder = "github.com/owner/repo or gitlab.com/owner/repo",
+                                placeholder = stringResource(Res.string.patch_source_dialog_repo_placeholder),
                                 font = font,
                                 accents = accents,
                                 corners = corners,
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Text(
-                                "Accepts GitHub, GitLab, or morphe.software/add-source link",
+                                stringResource(Res.string.patch_source_dialog_repo_hint),
                                 fontFamily = font,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp),
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text(
-                                        text = "Pre-release patches",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        fontFamily = font,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Receives early access to new experimental patch versions",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        fontFamily = font,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        lineHeight = 14.sp
+                            val isPullRequest = RemotePatchSourceFactory.parse(url)?.provider == PatchProvider.GITHUB_PR
+                            if (!isPullRequest) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text(
+                                            text = stringResource(Res.string.patch_source_dialog_pre_release_title),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            fontFamily = font,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = stringResource(Res.string.patch_source_dialog_pre_release_hint),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Normal,
+                                            fontFamily = font,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            lineHeight = 14.sp
+                                        )
+                                    }
+                                    MorpheSwitch(
+                                        checked = usePreRelease,
+                                        onCheckedChange = { usePreRelease = it },
+                                        accentColor = accents.primary
                                     )
                                 }
-                                MorpheSwitch(
-                                    checked = usePreRelease,
-                                    onCheckedChange = { usePreRelease = it },
-                                    accentColor = accents.primary
-                                )
                             }
                             if (isQuickMode) {
                                 Row(
@@ -203,14 +199,14 @@ internal fun AddPatchSourceDialog(
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
                                         Text(
-                                            text = "Experimental app versions",
+                                            text = stringResource(Res.string.patch_source_dialog_experimental_title),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium,
                                             fontFamily = font,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "Prioritizes experimental app versions if available",
+                                            text = stringResource(Res.string.patch_source_dialog_experimental_hint),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Normal,
                                             fontFamily = font,
@@ -259,17 +255,20 @@ internal fun AddPatchSourceDialog(
         },
         confirmButton = {
             val dimens = LocalMorpheDimens.current
+            val errNameRequired = stringResource(Res.string.patch_source_dialog_error_name_required)
+            val errInvalidUrl = stringResource(Res.string.patch_source_dialog_error_invalid_url)
+            val errInvalidFile = stringResource(Res.string.patch_source_dialog_error_invalid_file)
             Button(
                 onClick = {
-                    if (name.isBlank()) { error = "Name is required"; return@Button }
+                    if (name.isBlank()) { error = errNameRequired; return@Button }
                     when (sourceType) {
                         PatchSourceType.GITHUB -> {
-                            // sourceType is the UI's "REMOTE" mode placeholder;
-                            // the actual provider (GITHUB vs GITLAB) is decided
+                            // sourceType is the UI's "REMOTE" mode placeholder.
+                            // The actual provider (GITHUB vs GITLAB) is decided
                             // by the resolver based on the URL the user pasted.
                             val resolved = resolveRemoteSourceUrl(url.trim())
                             if (resolved == null) {
-                                error = "Enter a valid GitHub or GitLab URL"; return@Button
+                                error = errInvalidUrl; return@Button
                             }
                             onAdd(PatchSource(
                                 id = UUID.randomUUID().toString(),
@@ -284,7 +283,7 @@ internal fun AddPatchSourceDialog(
                         }
                         PatchSourceType.LOCAL -> {
                             if (filePath.isBlank() || !File(filePath).exists()) {
-                                error = "Select a valid .mpp file"; return@Button
+                                error = errInvalidFile; return@Button
                             }
                         }
                         else -> {}
@@ -302,10 +301,10 @@ internal fun AddPatchSourceDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = accents.primary),
                 shape = RoundedCornerShape(corners.small),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                modifier = Modifier.height(dimens.controlHeight),
+                modifier = Modifier.height(dimens.controlHeight).handCursor(),
             ) {
                 Text(
-                    "Add",
+                    stringResource(Res.string.patch_source_dialog_add_button),
                     fontFamily = font,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal
@@ -318,10 +317,10 @@ internal fun AddPatchSourceDialog(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(corners.small),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                modifier = Modifier.height(dimens.controlHeight),
+                modifier = Modifier.height(dimens.controlHeight).handCursor(),
             ) {
                 Text(
-                    "Cancel",
+                    stringResource(Res.string.cancel),
                     fontFamily = font,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal
@@ -357,13 +356,11 @@ internal fun EditPatchSourceDialog(
         lastLocalPatchDir = cfg.lastLocalPatchDir
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(corners.medium),
-        containerColor = MaterialTheme.colorScheme.surface,
+    MorpheAlertDialog(
+        onDismiss = onDismiss,
         title = {
             Text(
-                "Edit source",
+                stringResource(Res.string.patch_source_dialog_edit_title),
                 fontFamily = font,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp
@@ -374,12 +371,14 @@ internal fun EditPatchSourceDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.widthIn(min = 300.dp)
             ) {
+                val isPullRequest = RemotePatchSourceFactory.parse(url)?.provider == PatchProvider.GITHUB_PR
                 if (source.deletable) {
                     Text(
-                        text = when (source.type) {
-                            PatchSourceType.GITHUB -> "GitHub Repository"
-                            PatchSourceType.GITLAB -> "GitLab Repository"
-                            PatchSourceType.LOCAL -> "Local file"
+                        text = when {
+                            isPullRequest -> stringResource(Res.string.patch_source_dialog_type_github_pr)
+                            source.type == PatchSourceType.GITHUB -> stringResource(Res.string.patch_source_dialog_type_github_repo)
+                            source.type == PatchSourceType.GITLAB -> stringResource(Res.string.patch_source_dialog_type_gitlab_repo)
+                            source.type == PatchSourceType.LOCAL -> stringResource(Res.string.patch_source_dialog_local_file_label)
                             else -> ""
                         },
                         fontSize = 11.sp,
@@ -388,7 +387,7 @@ internal fun EditPatchSourceDialog(
                         color = accents.primary
                     )
 
-                    LabeledField(label = "Name", font = font) {
+                    LabeledField(label = stringResource(Res.string.patch_source_dialog_name_label), font = font) {
                         SlimTextField(
                             value = name,
                             onValueChange = { name = it; error = null },
@@ -402,11 +401,11 @@ internal fun EditPatchSourceDialog(
 
                     when (source.type) {
                         PatchSourceType.GITHUB, PatchSourceType.GITLAB -> {
-                            LabeledField(label = "Repository URL", font = font) {
+                            LabeledField(label = stringResource(Res.string.patch_source_dialog_repo_url_label), font = font) {
                                 SlimTextField(
                                     value = url,
                                     onValueChange = { url = it; error = null },
-                                    placeholder = "github.com/owner/repo or gitlab.com/owner/repo",
+                                    placeholder = stringResource(Res.string.patch_source_dialog_repo_placeholder),
                                     font = font,
                                     accents = accents,
                                     corners = corners,
@@ -434,34 +433,37 @@ internal fun EditPatchSourceDialog(
                 }
 
                 if (source.type != PatchSourceType.LOCAL) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = if (source.deletable) 8.dp else 0.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                            Text(
-                                text = "Pre-release patches",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                fontFamily = font,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Receives early access to new experimental patch versions",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Normal,
-                                fontFamily = font,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                lineHeight = 14.sp
+                    if (!isPullRequest) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = if (source.deletable) 8.dp else 0.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                Text(
+                                    text = stringResource(Res.string.patch_source_dialog_pre_release_title),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFamily = font,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = stringResource(Res.string.patch_source_dialog_pre_release_hint),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    fontFamily = font,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                            MorpheSwitch(
+                                checked = usePreRelease,
+                                onCheckedChange = { usePreRelease = it },
+                                accentColor = accents.primary
                             )
                         }
-                        MorpheSwitch(
-                            checked = usePreRelease,
-                            onCheckedChange = { usePreRelease = it },
-                            accentColor = accents.primary
-                        )
                     }
+
                     if (isQuickMode) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -470,14 +472,14 @@ internal fun EditPatchSourceDialog(
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
                                 Text(
-                                    text = "Experimental app versions",
+                                    text = stringResource(Res.string.patch_source_dialog_experimental_title),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     fontFamily = font,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Prioritizes experimental app versions if available",
+                                    text = stringResource(Res.string.patch_source_dialog_experimental_hint),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Normal,
                                     fontFamily = font,
@@ -501,9 +503,12 @@ internal fun EditPatchSourceDialog(
         },
         confirmButton = {
             val dimens = LocalMorpheDimens.current
+            val errNameRequired = stringResource(Res.string.patch_source_dialog_error_name_required)
+            val errInvalidUrl = stringResource(Res.string.patch_source_dialog_error_invalid_url)
+            val errInvalidFile = stringResource(Res.string.patch_source_dialog_error_invalid_file)
             Button(
                 onClick = {
-                    if (name.isBlank()) { error = "Name is required"; return@Button }
+                    if (name.isBlank()) { error = errNameRequired; return@Button }
                     when (source.type) {
                         PatchSourceType.GITHUB, PatchSourceType.GITLAB -> {
                             // Re-resolve on save so the user can switch hosts
@@ -511,7 +516,7 @@ internal fun EditPatchSourceDialog(
                             // provider type updates with the detected host.
                             val resolved = resolveRemoteSourceUrl(url.trim())
                             if (resolved == null) {
-                                error = "Enter a valid GitHub or GitLab URL"; return@Button
+                                error = errInvalidUrl; return@Button
                             }
                             onSave(source.copy(
                                 name = name.trim(),
@@ -524,7 +529,7 @@ internal fun EditPatchSourceDialog(
                         }
                         PatchSourceType.LOCAL -> {
                             if (filePath.isBlank() || !File(filePath).exists()) {
-                                error = "Select a valid .mpp file"; return@Button
+                                error = errInvalidFile; return@Button
                             }
                         }
                         else -> {}
@@ -539,10 +544,10 @@ internal fun EditPatchSourceDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = accents.primary),
                 shape = RoundedCornerShape(corners.small),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                modifier = Modifier.height(dimens.controlHeight),
+                modifier = Modifier.height(dimens.controlHeight).handCursor(),
             ) {
                 Text(
-                    "Save",
+                    stringResource(Res.string.save),
                     fontFamily = font,
                     fontWeight = FontWeight.Normal,
                     fontSize = 11.sp
@@ -555,10 +560,10 @@ internal fun EditPatchSourceDialog(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(corners.small),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                modifier = Modifier.height(dimens.controlHeight),
+                modifier = Modifier.height(dimens.controlHeight).handCursor(),
             ) {
                 Text(
-                    "Cancel",
+                    stringResource(Res.string.cancel),
                     fontFamily = font,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal
@@ -571,7 +576,7 @@ internal fun EditPatchSourceDialog(
 /**
  * Result of parsing a user-entered remote source URL. The detected
  * [provider] is the GUI-side persisted type that will be stored on the
- * [PatchSource] config (GITHUB or GITLAB only — never DEFAULT or LOCAL).
+ * [PatchSource] config (GITHUB or GITLAB only, never DEFAULT or LOCAL).
  */
 internal data class ResolvedRemoteSource(
     val canonicalUrl: String,
@@ -581,21 +586,21 @@ internal data class ResolvedRemoteSource(
 /**
  * Thin GUI-side wrapper around the engine's [RemotePatchSourceFactory.parse].
  * Returns `null` if the engine can't classify the input. The engine owns
- * the actual URL-parsing logic — this function only translates the engine's
+ * the actual URL-parsing logic. This function only translates the engine's
  * [app.morphe.engine.patches.PatchProvider] back to the GUI's persisted
  * [PatchSourceType] (which carries DEFAULT/LOCAL too).
  */
 internal fun resolveRemoteSourceUrl(input: String): ResolvedRemoteSource? {
     val parsed = RemotePatchSourceFactory.parse(input) ?: return null
     val type = when (parsed.provider) {
-        PatchProvider.GITHUB -> PatchSourceType.GITHUB
+        PatchProvider.GITHUB, PatchProvider.GITHUB_PR -> PatchSourceType.GITHUB
         PatchProvider.GITLAB -> PatchSourceType.GITLAB
     }
     return ResolvedRemoteSource(canonicalUrl = parsed.canonicalUrl, provider = type)
 }
 
 /**
- * Suggest a friendly source name from a typed/pasted URL — used to populate
+ * Suggest a friendly source name from a typed or pasted URL, used to populate
  * the NAME field while the user is filling in REPOSITORY URL, so they don't
  * have to think one up themselves. Returns `<owner>/<repo>` so two sources
  * with similarly-named repos (e.g. forks of `morphe-patches`) stay
@@ -604,6 +609,9 @@ internal fun resolveRemoteSourceUrl(input: String): ResolvedRemoteSource? {
  */
 private fun suggestNameFromUrl(input: String): String? {
     val parsed = RemotePatchSourceFactory.parse(input) ?: return null
+    if (parsed.prNumber != null) {
+        return "${parsed.repoPath}#${parsed.prNumber}"
+    }
     return parsed.repoPath.takeIf { it.isNotBlank() }
 }
 
@@ -618,15 +626,15 @@ private fun dirToRemember(path: String): String? =
 /**
  * Shared local-source picker row for the Add/Edit source dialogs.
  *
- * The file browser always opens at a useful folder — the current path's directory when
- * editing, else the last-used folder — so re-picking a local `.mpp` never starts from a
+ * The file browser always opens at a useful folder: the current path's directory when
+ * editing, else the last-used folder, so re-picking a local `.mpp` never starts from a
  * system default. When [developerOptions] is on it also offers a FOLDER picker: a folder
  * source auto-resolves to the newest `.mpp` inside it (see
  * [EnabledSourcesLoader.resolveLocal][app.morphe.gui.util.EnabledSourcesLoader]), so a
  * patch developer who rebuilds never has to re-pick the file.
  *
  * [onPicked] receives the chosen path and a suggested name (file name without extension,
- * or the folder name) — callers use the suggestion only when a name isn't already set.
+ * or the folder name). Callers use the suggestion only when a name isn't already set.
  */
 @Composable
 private fun LocalSourceRow(
@@ -646,7 +654,9 @@ private fun LocalSourceRow(
         return fromCurrent ?: lastLocalPatchDir?.takeIf { File(it).isDirectory }
     }
 
-    LabeledField(label = if (developerOptions) ".mpp file or folder" else ".mpp file", font = font) {
+    val pickerSelectFileTitle = stringResource(Res.string.patch_source_dialog_picker_select_file)
+    val pickerSelectFolderTitle = stringResource(Res.string.patch_source_dialog_picker_select_folder)
+    LabeledField(label = if (developerOptions) stringResource(Res.string.patch_source_dialog_mpp_or_folder_label) else stringResource(Res.string.patch_source_dialog_mpp_label), font = font) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -656,7 +666,7 @@ private fun LocalSourceRow(
                 SlimTextField(
                     value = filePath,
                     onValueChange = {},
-                    placeholder = if (developerOptions) "Path to .mpp or folder" else "Path to .mpp",
+                    placeholder = if (developerOptions) stringResource(Res.string.patch_source_dialog_path_placeholder_dev) else stringResource(Res.string.patch_source_dialog_path_placeholder),
                     font = font,
                     accents = accents,
                     corners = corners,
@@ -664,13 +674,13 @@ private fun LocalSourceRow(
                     readOnly = true,
                 )
                 DialogActionButton(
-                    label = if (developerOptions) "File" else "Browse",
+                    label = if (developerOptions) stringResource(Res.string.patch_source_dialog_file_button) else stringResource(Res.string.browse),
                     font = font,
                     corners = corners,
                     onClick = {
                         scope.launch {
                             val picked = MorpheFilePicker.pickFile(
-                                title = "Select .mpp file",
+                                title = pickerSelectFileTitle,
                                 startDir = startDir()?.let { File(it) },
                                 extensions = listOf("mpp"),
                             )
@@ -682,7 +692,7 @@ private fun LocalSourceRow(
                 )
                 if (developerOptions) {
                     DialogActionButton(
-                        label = "Folder",
+                        label = stringResource(Res.string.folder),
                         font = font,
                         corners = corners,
                         onClick = {
@@ -690,7 +700,7 @@ private fun LocalSourceRow(
                             // Win/macOS) via the shared MorpheFilePicker wrapper.
                             scope.launch {
                                 MorpheFilePicker.pickDirectory(
-                                    title = "Select a folder (newest .mpp is used)",
+                                    title = pickerSelectFolderTitle,
                                     startDir = startDir()?.let { File(it) },
                                 )?.let { dir -> onPicked(dir.absolutePath, dir.name) }
                             }
@@ -700,7 +710,7 @@ private fun LocalSourceRow(
             }
             if (developerOptions) {
                 Text(
-                    text = "Pick a folder to always load the newest .mpp inside it - handy when rebuilding patches",
+                    text = stringResource(Res.string.patch_source_dialog_folder_hint),
                     fontFamily = font,
                     fontWeight = FontWeight.Normal,
                     fontSize = 11.sp,

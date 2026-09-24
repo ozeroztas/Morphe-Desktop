@@ -5,14 +5,18 @@
 
 package app.morphe.gui.icon
 
-import androidx.compose.foundation.BorderStroke
+import app.morphe.gui.ui.components.color.MorpheGradientEditor
+import app.morphe.gui.ui.components.color.MorpheSwatchRow
+import app.morphe.gui.ui.components.MorpheChoiceChip
+import app.morphe.gui.ui.components.MorpheAdjustRow
+import app.morphe.gui.data.model.GradientType
+import app.morphe.gui.data.model.MorpheFill
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
@@ -28,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
@@ -42,6 +45,8 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -51,12 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import app.morphe.gui.ui.components.MorpheButton
 import app.morphe.gui.ui.components.MorpheButtonVariant
-import app.morphe.gui.ui.components.MorpheColorPickerCard
 import app.morphe.gui.ui.components.MorpheDropdown
 import app.morphe.gui.ui.components.MorpheDropdownItem
 import app.morphe.gui.ui.components.morpheScrollbarStyle
@@ -66,34 +68,28 @@ import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.MorpheAccentColors
 import app.morphe.gui.util.MorpheFilePicker
-import java.awt.Color.HSBtoRGB
-import java.awt.Color.RGBtoHSB
+import app.morphe.morphe_desktop.generated.resources.*
 import java.awt.GraphicsEnvironment
 import java.io.File
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.hypot
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.stringResource
 
 private const val RENDER = 320
 private const val SNAP = 0.015f
 
-private val MASKS: List<Pair<String, Shape>> = listOf(
-    "Circle" to CircleShape,
-    "Squircle" to RoundedCornerShape(46),
-    "Rounded" to RoundedCornerShape(28),
-    "Square" to RoundedCornerShape(8),
-)
+private data class MaskOption(val nameRes: StringResource, val shape: Shape)
 
-private val SWATCHES = listOf(
-    0xFFFFFFFF.toInt(), 0xFF000000.toInt(), 0xFFFF0033.toInt(), 0xFF00E5FF.toInt(),
-    0xFF1DE9B6.toInt(), 0xFFFFC400.toInt(), 0xFF7C4DFF.toInt(), 0xFFFF6D00.toInt(),
+private val MASKS: List<MaskOption> = listOf(
+    MaskOption(Res.string.icon_studio_shape_circle, CircleShape),
+    MaskOption(Res.string.icon_studio_mask_squircle, RoundedCornerShape(46)),
+    MaskOption(Res.string.icon_studio_shape_rounded, RoundedCornerShape(28)),
+    MaskOption(Res.string.icon_studio_shape_square, RoundedCornerShape(8)),
 )
 
 /**
@@ -207,7 +203,7 @@ fun IconStudioDialog(
 
     suspend fun pickImage(): File? =
         MorpheFilePicker.pickFile(
-            title = "Select image",
+            title = getString(Res.string.select_image),
             extensions = listOf("png", "jpg", "jpeg", "webp"),
         )
 
@@ -218,10 +214,10 @@ fun IconStudioDialog(
         return dest.absolutePath
     }
 
-    fun warnFor(outcome: ForegroundPrep.Outcome): String? = when (outcome) {
+    suspend fun warnFor(outcome: ForegroundPrep.Outcome): String? = when (outcome) {
         ForegroundPrep.Outcome.OPAQUE ->
-            "This image has no transparency, so the themed & notification icons will be a solid block. Use a cut-out (transparent) PNG for those to show your logo's shape."
-        ForegroundPrep.Outcome.UNREADABLE -> "Couldn't read this image to check its transparency."
+            getString(Res.string.icon_studio_warn_opaque)
+        ForegroundPrep.Outcome.UNREADABLE -> getString(Res.string.icon_studio_warn_unreadable)
         else -> null  // Already transparent. Nothing to warn about
     }
 
@@ -249,7 +245,7 @@ fun IconStudioDialog(
         scope.launch {
             val picked = pickImage() ?: return@launch
             val path = withContext(Dispatchers.IO) { copyIntoProject(picked) }
-            commit(project.copy(background = IconProject.Background.Image(path)))
+            commit(project.copy(background = MorpheFill.Image(path)))
         }
     }
 
@@ -257,7 +253,7 @@ fun IconStudioDialog(
         if (selected?.content !is IconProject.LayerContent.Text) return
         scope.launch {
             val picked = MorpheFilePicker.pickFile(
-                title = "Select font",
+                title = getString(Res.string.icon_studio_picker_select_font),
                 extensions = listOf("ttf", "otf"),
             ) ?: return@launch
             val path = withContext(Dispatchers.IO) { copyIntoProject(picked) }
@@ -284,34 +280,33 @@ fun IconStudioDialog(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(corners.medium),
             color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.width(800.dp).heightIn(max = 660.dp).padding(4.dp),
+            modifier = Modifier.width(840.dp).heightIn(max = 660.dp).padding(4.dp),
         ) {
             Column(Modifier.padding(20.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Icon Studio", fontFamily = font, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text(stringResource(Res.string.icon_studio_title), fontFamily = font, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.weight(1f))
-                    StudioButton("Undo", accents, font, enabled = histIndex > 0, filled = false, icon = MorpheIcons.Undo) { undo() }
+                    StudioButton(stringResource(Res.string.icon_studio_undo_button), accents, font, enabled = histIndex > 0, filled = false, icon = MorpheIcons.Undo) { undo() }
                     Spacer(Modifier.width(6.dp))
-                    StudioButton("Redo", accents, font, enabled = histIndex < history.lastIndex, filled = false, icon = MorpheIcons.Redo) { redo() }
+                    StudioButton(stringResource(Res.string.icon_studio_redo_button), accents, font, enabled = histIndex < history.lastIndex, filled = false, icon = MorpheIcons.Redo) { redo() }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 14.dp)) {
-                    Label("Templates", font)
-                    Toggle("Gradient", selectedTemplate == "GRADIENT", accents, font) { applyTemplate("GRADIENT", templateGradient()) }
-                    Toggle("Badge", selectedTemplate == "BADGE", accents, font) { applyTemplate("BADGE", templateBadge()) }
-                    Toggle("Shape", selectedTemplate == "SHAPE", accents, font) { applyTemplate("SHAPE", templateShape()) }
+                    Label(stringResource(Res.string.icon_studio_templates), font)
+                    Toggle(stringResource(Res.string.icon_studio_background_gradient), selectedTemplate == "GRADIENT", accents, font) { applyTemplate("GRADIENT", templateGradient()) }
+                    Toggle(stringResource(Res.string.icon_studio_template_badge), selectedTemplate == "BADGE", accents, font) { applyTemplate("BADGE", templateBadge()) }
+                    Toggle(stringResource(Res.string.icon_studio_tab_shape), selectedTemplate == "SHAPE", accents, font) { applyTemplate("SHAPE", templateShape()) }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.weight(1f, fill = false)) {
                     // ── Previews: adaptive + monochrome side by side, mask gallery, status bar ──
                     Column(Modifier.width(previewColWidth), horizontalAlignment = Alignment.CenterHorizontally) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            // Adaptive icon — the full-colour result; interactive (drag the selected layer).
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Label("Adaptive", font)
+                                Label(stringResource(Res.string.icon_studio_preview_adaptive), font)
                                 Canvas(
-                                    Modifier.size(previewDp).clip(MASKS[selectedMask].second)
+                                    Modifier.size(previewDp).clip(MASKS[selectedMask].shape)
                                         .pointerInput(selectedId) {
                                             detectDragGestures(
                                                 onDragStart = { dragging = true },
@@ -339,37 +334,36 @@ fun IconStudioDialog(
                                     }
                                 }
                             }
-                            // Monochrome / themed icon — Android 13+ launchers tint the foreground silhouette.
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Label("Monochrome", font)
-                                Canvas(Modifier.size(previewDp).clip(MASKS[selectedMask].second).background(Color(0xFF15171E))) {
+                                Label(stringResource(Res.string.icon_studio_preview_monochrome), font)
+                                Canvas(Modifier.size(previewDp).clip(MASKS[selectedMask].shape).background(Color(0xFF15171E))) {
                                     silhouette?.let { drawImage(it, dstOffset = IntOffset.Zero, dstSize = IntSize(size.width.toInt(), size.height.toInt()), colorFilter = ColorFilter.tint(accents.primary)) }
                                 }
                             }
                         }
                         Spacer(Modifier.height(14.dp))
-                        Label("Preview shapes", font)
+                        Label(stringResource(Res.string.icon_studio_preview_shapes), font)
                         Text(
-                            "Each launcher picks its own shape, tap to preview how it'll be cropped",
+                            stringResource(Res.string.icon_studio_preview_shapes_hint),
                             fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
                         Spacer(Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            MASKS.forEachIndexed { i, (name, shape) ->
+                            MASKS.forEachIndexed { i, mask ->
                                 val sel = i == selectedMask
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Canvas(Modifier.size(48.dp).clip(shape).border(if (sel) 2.dp else 1.dp, accents.primary.copy(alpha = if (sel) 0.8f else 0.25f), shape).clickable { selectedMask = i }) {
+                                    Canvas(Modifier.size(48.dp).clip(mask.shape).border(if (sel) 2.dp else 1.dp, accents.primary.copy(alpha = if (sel) 0.8f else 0.25f), mask.shape).clickable { selectedMask = i }) {
                                         drawPreview(preview)
                                     }
                                     Spacer(Modifier.height(3.dp))
-                                    Text(name, fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, color = if (sel) accents.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(stringResource(mask.nameRes), fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, color = if (sel) accents.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                         Spacer(Modifier.height(14.dp))
-                        Label("Notification / Status bar", font)
+                        Label(stringResource(Res.string.icon_studio_preview_notification_status_bar), font)
                         Spacer(Modifier.height(6.dp))
                         StatusBarPreview(notifSilhouette, font)
                     }
@@ -390,7 +384,7 @@ fun IconStudioDialog(
                             ) {
                                 Icon(MorpheIcons.Warning, contentDescription = null, tint = Color(0xFFE0504D), modifier = Modifier.size(14.dp))
                                 Text(msg, fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                Icon(MorpheIcons.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp).clickable { importWarning = null })
+                                Icon(MorpheIcons.Close, contentDescription = stringResource(Res.string.close), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(13.dp).clickable { importWarning = null })
                             }
                         }
                         LayersPanel(project.layers, selectedId, accents, font, onSelect = { selectedId = it }, onAddImage = { addImageLayer() }, onAddText = { addLayer(IconProject.LayerContent.Text()) }, onAddShape = { addLayer(IconProject.LayerContent.Shape()) }, onReorder = { f, t -> reorderDisplay(f, t) }, onDelete = { deleteSelected() })
@@ -400,45 +394,45 @@ fun IconStudioDialog(
                         selected?.let { layer ->
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Label("Layer", font)
+                                    Label(stringResource(Res.string.icon_studio_layer_label), font)
                                     Spacer(Modifier.weight(1f))
-                                    Toggle("Duplicate", false, accents, font) { duplicateSelected() }
+                                    Toggle(stringResource(Res.string.icon_studio_duplicate_button), false, accents, font) { duplicateSelected() }
                                 }
-                                TextInput(layer.name ?: "", font, accents, placeholder = "Layer name") { n -> updateSelected { it.copy(name = n.ifBlank { null }) } }
-                                AdjustRow("Opacity", layer.opacity, 0f..1f, 2, font, accents) { o -> updateSelected { it.copy(opacity = o) } }
+                                TextInput(layer.name ?: "", font, accents, placeholder = stringResource(Res.string.icon_studio_layer_name_placeholder)) { n -> updateSelected { it.copy(name = n.ifBlank { null }) } }
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_opacity), layer.opacity, 0f..1f, 2, font, accents) { o -> updateSelected { it.copy(opacity = o) } }
                             }
                             LayerContentControls(layer, accents, font, onReplaceImage = { replaceSelectedImage() }, onPickFont = { pickAndSetFont() }) { updateSelected(it) }
 
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Label("Transform", font)
-                                AdjustRow("Scale", layer.scale, 0.1f..3f, 2, font, accents) { v -> updateSelected { it.copy(scale = v) } }
-                                AdjustRow("Rotation", layer.rotationDeg, -180f..180f, 0, font, accents) { v -> updateSelected { it.copy(rotationDeg = v) } }
-                                StudioButton("Reset position", accents, font, filled = false) { updateSelected { it.copy(offsetX = 0f, offsetY = 0f, rotationDeg = 0f) } }
+                                Label(stringResource(Res.string.icon_studio_transform_label), font)
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_scale), layer.scale, 0.1f..3f, 2, font, accents) { v -> updateSelected { it.copy(scale = v) } }
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_rotation), layer.rotationDeg, -180f..180f, 0, font, accents) { v -> updateSelected { it.copy(rotationDeg = v) } }
+                                StudioButton(stringResource(Res.string.icon_studio_reset_position_button), accents, font, filled = false) { updateSelected { it.copy(offsetX = 0f, offsetY = 0f, rotationDeg = 0f) } }
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Label("Color", font)
-                                AdjustRow("Hue", layer.hueShiftDeg, -180f..180f, 0, font, accents) { v -> updateSelected { it.copy(hueShiftDeg = v) } }
-                                AdjustRow("Saturation", layer.saturation, 0f..2f, 2, font, accents) { v -> updateSelected { it.copy(saturation = v) } }
-                                AdjustRow("Brightness", layer.brightness, 0f..2f, 2, font, accents) { v -> updateSelected { it.copy(brightness = v) } }
+                                Label(stringResource(Res.string.icon_studio_color_label), font)
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_hue), layer.hueShiftDeg, -180f..180f, 0, font, accents) { v -> updateSelected { it.copy(hueShiftDeg = v) } }
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_saturation), layer.saturation, 0f..2f, 2, font, accents) { v -> updateSelected { it.copy(saturation = v) } }
+                                AdjustRow(stringResource(Res.string.icon_studio_adjust_brightness), layer.brightness, 0f..2f, 2, font, accents) { v -> updateSelected { it.copy(brightness = v) } }
                             }
-                            EffectSection("Shadow", layer.shadow != null, accents, font, onToggle = { on -> updateSelected { it.copy(shadow = if (on) (it.shadow ?: IconProject.Shadow()) else null) } }) {
+                            EffectSection(stringResource(Res.string.icon_studio_effect_shadow), layer.shadow != null, accents, font, onToggle = { on -> updateSelected { it.copy(shadow = if (on) (it.shadow ?: IconProject.Shadow()) else null) } }) {
                                 layer.shadow?.let { sh ->
-                                    AdjustRow("Y offset", sh.offsetY, -0.15f..0.15f, 3, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(offsetY = v)) } }
-                                    AdjustRow("Blur", sh.blur, 0f..0.1f, 3, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(blur = v)) } }
-                                    AdjustRow("Opacity", sh.alpha, 0f..1f, 2, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(alpha = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_y_offset), sh.offsetY, -0.15f..0.15f, 3, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(offsetY = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_blur), sh.blur, 0f..0.1f, 3, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(blur = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_opacity), sh.alpha, 0f..1f, 2, font, accents) { v -> updateSelected { it.copy(shadow = sh.copy(alpha = v)) } }
                                 }
                             }
-                            EffectSection("Glow", layer.glow != null, accents, font, onToggle = { on -> updateSelected { it.copy(glow = if (on) (it.glow ?: IconProject.Glow()) else null) } }) {
+                            EffectSection(stringResource(Res.string.icon_studio_effect_glow), layer.glow != null, accents, font, onToggle = { on -> updateSelected { it.copy(glow = if (on) (it.glow ?: IconProject.Glow()) else null) } }) {
                                 layer.glow?.let { gl ->
                                     SwatchRow(gl.color) { c -> updateSelected { it.copy(glow = gl.copy(color = c)) } }
-                                    AdjustRow("Blur", gl.blur, 0f..0.1f, 3, font, accents) { v -> updateSelected { it.copy(glow = gl.copy(blur = v)) } }
-                                    AdjustRow("Opacity", gl.alpha, 0f..1f, 2, font, accents) { v -> updateSelected { it.copy(glow = gl.copy(alpha = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_blur), gl.blur, 0f..0.1f, 3, font, accents) { v -> updateSelected { it.copy(glow = gl.copy(blur = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_opacity), gl.alpha, 0f..1f, 2, font, accents) { v -> updateSelected { it.copy(glow = gl.copy(alpha = v)) } }
                                 }
                             }
-                            EffectSection("Stroke", layer.stroke != null, accents, font, onToggle = { on -> updateSelected { it.copy(stroke = if (on) (it.stroke ?: IconProject.Stroke()) else null) } }) {
+                            EffectSection(stringResource(Res.string.icon_studio_effect_stroke), layer.stroke != null, accents, font, onToggle = { on -> updateSelected { it.copy(stroke = if (on) (it.stroke ?: IconProject.Stroke()) else null) } }) {
                                 layer.stroke?.let { st ->
                                     SwatchRow(st.color) { c -> updateSelected { it.copy(stroke = st.copy(color = c)) } }
-                                    AdjustRow("Width", st.width, 0f..0.04f, 3, font, accents) { v -> updateSelected { it.copy(stroke = st.copy(width = v)) } }
+                                    AdjustRow(stringResource(Res.string.icon_studio_adjust_width), st.width, 0f..0.04f, 3, font, accents) { v -> updateSelected { it.copy(stroke = st.copy(width = v)) } }
                                 }
                             }
                         }
@@ -452,9 +446,9 @@ fun IconStudioDialog(
                 }
 
                 Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End) {
-                    StudioButton("Cancel", accents, font, filled = false) { onDismiss() }
+                    StudioButton(stringResource(Res.string.cancel), accents, font, filled = false) { onDismiss() }
                     Spacer(Modifier.width(8.dp))
-                    StudioButton(if (busy) "Saving…" else "Save icon", accents, font, enabled = project.layers.isNotEmpty() && !busy) { save() }
+                    StudioButton(if (busy) stringResource(Res.string.status_saving) else stringResource(Res.string.icon_studio_save_icon_button), accents, font, enabled = project.layers.isNotEmpty() && !busy) { save() }
                 }
             }
         }
@@ -475,13 +469,13 @@ private fun LayersPanel(
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Label("Foreground", font)
+            Label(stringResource(Res.string.icon_studio_foreground_label), font)
             Spacer(Modifier.weight(1f))
-            Toggle("+ Image", false, accents, font) { onAddImage() }
-            Toggle("+ Text", false, accents, font) { onAddText() }
-            Toggle("+ Shape", false, accents, font) { onAddShape() }
+            Toggle(stringResource(Res.string.icon_studio_add_image_button), false, accents, font, icon = MorpheIcons.Add) { onAddImage() }
+            Toggle(stringResource(Res.string.icon_studio_add_text_button), false, accents, font, icon = MorpheIcons.Add) { onAddText() }
+            Toggle(stringResource(Res.string.icon_studio_add_shape_button), false, accents, font, icon = MorpheIcons.Add) { onAddShape() }
         }
-        Text("Your logo, layered in the safe zone. Drives the themed & notification icons", fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(Res.string.icon_studio_foreground_hint), fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (display.isEmpty()) {
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(corners.small)).background(accents.primary.copy(alpha = 0.08f))
@@ -490,7 +484,7 @@ private fun LayersPanel(
             ) {
                 Icon(MorpheIcons.Info, contentDescription = null, tint = accents.primary.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
                 Text(
-                    "No foreground yet - add a layer (+ Image / Text / Shape). Themed & notification icons come from the foreground, so a background-only icon shows nothing there (we fall back to the whole icon)",
+                    stringResource(Res.string.icon_studio_no_foreground_hint),
                     fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, lineHeight = 12.sp, color = accents.primary,
                 )
             }
@@ -523,7 +517,7 @@ private fun LayersPanel(
                         },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(MorpheIcons.DragIndicator, contentDescription = "Drag to reorder", tint = accents.primary.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                        Icon(MorpheIcons.DragIndicator, contentDescription = stringResource(Res.string.drag_to_reorder), tint = accents.primary.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
                     }
                     Text(layer.label, fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, color = if (sel) accents.primary else MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                     if (sel) SymBtn(MorpheIcons.Delete, accents) { onDelete() }
@@ -539,9 +533,9 @@ private fun LayerContentControls(
     onReplaceImage: () -> Unit, onPickFont: () -> Unit, update: ((IconProject.Layer) -> IconProject.Layer) -> Unit,
 ) {
     when (val c = layer.content) {
-        is IconProject.LayerContent.Image -> StudioButton("Replace icon", accents, font) { onReplaceImage() }
+        is IconProject.LayerContent.Image -> StudioButton(stringResource(Res.string.icon_studio_replace_icon_button), accents, font) { onReplaceImage() }
         is IconProject.LayerContent.Text -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Label("Text", font)
+            Label(stringResource(Res.string.icon_studio_text_label), font)
             TextInput(c.text, font, accents) { t -> update { it.copy(content = c.copy(text = t)) } }
             SwatchRow(c.color) { col -> update { it.copy(content = c.copy(color = col)) } }
             FontSelector(
@@ -551,18 +545,27 @@ private fun LayerContentControls(
                 onPickFont = onPickFont,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Toggle("Bold", c.bold, accents, font) { update { it.copy(content = c.copy(bold = !c.bold)) } }
-                Toggle("Italic", c.italic, accents, font) { update { it.copy(content = c.copy(italic = !c.italic)) } }
-                Toggle("Underline", c.underline, accents, font) { update { it.copy(content = c.copy(underline = !c.underline)) } }
-                Toggle("Strike", c.strikethrough, accents, font) { update { it.copy(content = c.copy(strikethrough = !c.strikethrough)) } }
+                Toggle(stringResource(Res.string.icon_studio_toggle_bold), c.bold, accents, font) { update { it.copy(content = c.copy(bold = !c.bold)) } }
+                Toggle(stringResource(Res.string.icon_studio_toggle_italic), c.italic, accents, font) { update { it.copy(content = c.copy(italic = !c.italic)) } }
+                Toggle(stringResource(Res.string.icon_studio_toggle_underline), c.underline, accents, font) { update { it.copy(content = c.copy(underline = !c.underline)) } }
+                Toggle(stringResource(Res.string.icon_studio_toggle_strike), c.strikethrough, accents, font) { update { it.copy(content = c.copy(strikethrough = !c.strikethrough)) } }
             }
-            AdjustRow("Spacing", c.letterSpacing, -0.05f..0.4f, 3, font, accents) { sp -> update { it.copy(content = c.copy(letterSpacing = sp)) } }
+            AdjustRow(stringResource(Res.string.icon_studio_adjust_spacing), c.letterSpacing, -0.05f..0.4f, 3, font, accents) { sp -> update { it.copy(content = c.copy(letterSpacing = sp)) } }
         }
         is IconProject.LayerContent.Shape -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Label("Shape", font)
+            Label(stringResource(Res.string.icon_studio_tab_shape), font)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 IconProject.ShapeKind.entries.forEach { k ->
-                    val label = k.name.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                    val label = when (k) {
+                        IconProject.ShapeKind.CIRCLE -> stringResource(Res.string.icon_studio_shape_circle)
+                        IconProject.ShapeKind.SQUARE -> stringResource(Res.string.icon_studio_shape_square)
+                        IconProject.ShapeKind.ROUNDED -> stringResource(Res.string.icon_studio_shape_rounded)
+                        IconProject.ShapeKind.TRIANGLE -> stringResource(Res.string.icon_studio_shape_triangle)
+                        IconProject.ShapeKind.DIAMOND -> stringResource(Res.string.icon_studio_shape_diamond)
+                        IconProject.ShapeKind.PENTAGON -> stringResource(Res.string.icon_studio_shape_pentagon)
+                        IconProject.ShapeKind.HEXAGON -> stringResource(Res.string.icon_studio_shape_hexagon)
+                        IconProject.ShapeKind.STAR -> stringResource(Res.string.icon_studio_shape_star)
+                    }
                     Toggle(label, c.kind == k, accents, font) { update { it.copy(content = c.copy(kind = k)) } }
                 }
             }
@@ -576,19 +579,20 @@ private fun FontSelector(
     fontName: String?, fontPath: String?, font: FontFamily, accents: MorpheAccentColors,
     onSystemFont: (String) -> Unit, onDefault: () -> Unit, onPickFont: () -> Unit,
 ) {
+    val defaultFontLabel = stringResource(Res.string.icon_studio_default_font)
     val fonts = remember { GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toList() }
     val label = when {
         fontPath != null -> File(fontPath).name
         fontName != null -> fontName
-        else -> "Default font"
+        else -> defaultFontLabel
     }
     val items = buildList {
-        add(MorpheDropdownItem("Default font", onDefault))
+        add(MorpheDropdownItem(defaultFontLabel, onDefault))
         fonts.forEach { f -> add(MorpheDropdownItem(f) { onSystemFont(f) }) }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         MorpheDropdown(label, items, modifier = Modifier.weight(1f), searchable = true)
-        Toggle("+ File", false, accents, font) { onPickFont() }
+        Toggle(stringResource(Res.string.icon_studio_add_file_button), false, accents, font) { onPickFont() }
     }
 }
 
@@ -598,8 +602,8 @@ private fun EffectSection(name: String, on: Boolean, accents: MorpheAccentColors
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Label(name, font)
             Spacer(Modifier.weight(1f))
-            Toggle("Off", !on, accents, font, dense = true) { onToggle(false) }
-            Toggle("On", on, accents, font, dense = true) { onToggle(true) }
+            Toggle(stringResource(Res.string.off), !on, accents, font, dense = true) { onToggle(false) }
+            Toggle(stringResource(Res.string.on), on, accents, font, dense = true) { onToggle(true) }
         }
         body()
     }
@@ -610,122 +614,55 @@ private fun BackgroundControls(project: IconProject, accents: MorpheAccentColors
     val bg = project.background
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Label("Background", font)
+            Label(stringResource(Res.string.icon_studio_background_label), font)
             Spacer(Modifier.weight(1f))
-            Toggle("Solid", bg is IconProject.Background.Solid, accents, font) { onChange(project.copy(background = IconProject.Background.Solid(0xFFFFFFFF.toInt()))) }
-            Toggle("Gradient", bg is IconProject.Background.Gradient, accents, font) { onChange(project.copy(background = IconProject.Background.Gradient())) }
-            Toggle("Image", bg is IconProject.Background.Image, accents, font) { onImportBg() }
-        }
-        Text("Fills the whole tile, behind the foreground", fontFamily = font, fontWeight = FontWeight.Normal, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        when (bg) {
-            is IconProject.Background.Solid -> SwatchRow(bg.argb) { onChange(project.copy(background = IconProject.Background.Solid(it))) }
-            is IconProject.Background.Gradient -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Toggle("Linear", bg.type == IconProject.GradientType.LINEAR, accents, font) { onChange(project.copy(background = bg.copy(type = IconProject.GradientType.LINEAR))) }
-                    Toggle("Radial", bg.type == IconProject.GradientType.RADIAL, accents, font) { onChange(project.copy(background = bg.copy(type = IconProject.GradientType.RADIAL))) }
-                    Toggle("Conic", bg.type == IconProject.GradientType.CONIC, accents, font) { onChange(project.copy(background = bg.copy(type = IconProject.GradientType.CONIC))) }
-                }
-                bg.stops.forEachIndexed { i, stop ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ColorChip(stop.argb) { c -> onChange(project.copy(background = bg.copy(stops = bg.stops.mapIndexed { j, s -> if (j == i) s.copy(argb = c) else s }))) }
-                        Slider(value = stop.position, onValueChange = { p -> onChange(project.copy(background = bg.copy(stops = bg.stops.mapIndexed { j, s -> if (j == i) s.copy(position = p) else s }))) }, valueRange = 0f..1f, modifier = Modifier.weight(1f).height(20.dp))
-                        if (bg.stops.size > 2) SymBtn(MorpheIcons.Delete, accents) { onChange(project.copy(background = bg.copy(stops = bg.stops.filterIndexed { j, _ -> j != i }))) }
-                    }
-                }
-                Toggle("+ Stop", false, accents, font) { onChange(project.copy(background = bg.copy(stops = bg.stops + IconProject.Background.Stop(0.5f, 0xFFFFFFFF.toInt())))) }
-                if (bg.type != IconProject.GradientType.RADIAL) AdjustRow("Angle", bg.angleDeg, 0f..360f, 0, font, accents) { onChange(project.copy(background = bg.copy(angleDeg = it))) }
+            Toggle(stringResource(Res.string.icon_studio_background_solid), bg is MorpheFill.Solid, accents, font) {
+                onChange(project.copy(background = MorpheFill.Solid(0xFFFFFFFF.toInt())))
             }
-            is IconProject.Background.Image -> Text("Image background set - click IMAGE to replace", fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, color = accents.primary)
-        }
-    }
-}
-
-/** A single colour swatch that opens the full picker popup, for gradient stops. */
-@Composable
-private fun ColorChip(argb: Int, onChange: (Int) -> Unit) {
-    val accents = LocalMorpheAccents.current
-    val font = LocalMorpheFont.current
-    var open by remember { mutableStateOf(false) }
-    val yOff = with(LocalDensity.current) { 26.dp.roundToPx() }
-    Box {
-        Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(Color(argb)).border(1.dp, accents.primary.copy(alpha = 0.5f), RoundedCornerShape(4.dp)).clickable { open = true })
-        if (open) {
-            Popup(alignment = Alignment.TopStart, offset = IntOffset(0, yOff), onDismissRequest = { open = false }, properties = PopupProperties(focusable = true)) {
-                MorpheColorPickerCard(argb, accents, font, onPick = onChange)
+            Toggle(stringResource(Res.string.icon_studio_background_gradient), bg is MorpheFill.Gradient, accents, font) {
+                onChange(project.copy(background = MorpheFill.Gradient()))
             }
+            Toggle(stringResource(Res.string.icon_studio_background_image), bg is MorpheFill.Image, accents, font) { onImportBg() }
         }
-    }
-}
-
-@Composable
-private fun SwatchRow(selected: Int, onPick: (Int) -> Unit) {
-    val accents = LocalMorpheAccents.current
-    val font = LocalMorpheFont.current
-    var pickerOpen by remember { mutableStateOf(false) }
-    val yOff = with(LocalDensity.current) { 26.dp.roundToPx() }
-
-    @Composable
-    fun swatch(argb: Int) {
-        val isSel = selected == argb
-        Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(Color(argb)).border(if (isSel) 2.dp else 1.dp, if (isSel) accents.primary else Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).clickable { onPick(argb) })
-    }
-
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SWATCHES.forEach { swatch(it) }
-        CustomSwatches.colors.forEach { swatch(it) }
-        // Palette chip opens the full picker (wheel + hex + saved colours).
-        Box {
-            Box(
-                Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).border(1.dp, accents.primary.copy(alpha = 0.4f), RoundedCornerShape(4.dp)).clickable { pickerOpen = true },
-                contentAlignment = Alignment.Center,
-            ) { Icon(MorpheIcons.Palette, contentDescription = "Custom colour", tint = accents.primary, modifier = Modifier.size(13.dp)) }
-            if (pickerOpen) {
-                Popup(alignment = Alignment.TopStart, offset = IntOffset(0, yOff), onDismissRequest = { pickerOpen = false }, properties = PopupProperties(focusable = true)) {
-                    MorpheColorPickerCard(selected, accents, font, onPick = onPick)
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun AdjustRow(label: String, value: Float, range: ClosedFloatingPointRange<Float>, decimals: Int, font: FontFamily, accents: MorpheAccentColors, onChange: (Float) -> Unit) {
-    Column {
-        Text(label, fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Slider(value = value, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f).height(22.dp))
-            NumberField(value, decimals, range, font, accents, onChange)
-        }
-    }
-}
-
-@Composable
-private fun NumberField(value: Float, decimals: Int, range: ClosedFloatingPointRange<Float>, font: FontFamily, accents: MorpheAccentColors, onValue: (Float) -> Unit) {
-    val step = when (decimals) { 0 -> 1f; 1 -> 0.1f; 2 -> 0.05f; else -> 0.005f }
-    fun fmt(v: Float) = if (decimals == 0) "%.0f".format(v) else "%.${decimals}f".format(v)
-    var text by remember { mutableStateOf(fmt(value)) }
-    LaunchedEffect(value) { if (text.trim().toFloatOrNull() != value) text = fmt(value) }
-    val corners = LocalMorpheCorners.current
-    Row(Modifier.width(66.dp).height(26.dp).clip(RoundedCornerShape(corners.small)).border(1.dp, accents.primary.copy(alpha = 0.25f), RoundedCornerShape(corners.small)), verticalAlignment = Alignment.CenterVertically) {
-        BasicTextField(
-            value = text,
-            onValueChange = { text = it; it.trim().toFloatOrNull()?.let { v -> onValue(v.coerceIn(range)) } },
-            singleLine = true,
-            textStyle = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Normal, lineHeight = 12.sp, fontFamily = font, color = MaterialTheme.colorScheme.onSurface),
-            cursorBrush = SolidColor(accents.primary),
-            modifier = Modifier.weight(1f).padding(start = 6.dp),
+        Text(
+            stringResource(Res.string.icon_studio_background_hint),
+            fontFamily = font,
+            fontWeight = FontWeight.Normal,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Column(Modifier.fillMaxHeight().width(18.dp)) {
-            Box(Modifier.weight(1f).fillMaxWidth().clickable { onValue((value + step).coerceIn(range)) }, contentAlignment = Alignment.Center) {
-                Icon(MorpheIcons.ArrowDropUp, contentDescription = null, tint = accents.primary.copy(alpha = 0.8f), modifier = Modifier.size(18.dp).offset(y = 2.dp, x = (-1).dp))
+        when (bg) {
+            is MorpheFill.Accent -> Unit
+            is MorpheFill.Solid -> SwatchRow(bg.argb) {
+                onChange(project.copy(background = MorpheFill.Solid(it)))
             }
-            Box(Modifier.weight(1f).fillMaxWidth().clickable { onValue((value - step).coerceIn(range)) }, contentAlignment = Alignment.Center) {
-                Icon(MorpheIcons.ArrowDropDown, contentDescription = null, tint = accents.primary.copy(alpha = 0.8f), modifier = Modifier.size(18.dp).offset(y = (-2).dp, x = (-1).dp))
+            is MorpheFill.Gradient -> MorpheGradientEditor(bg, font) {
+                onChange(project.copy(background = it))
             }
+            is MorpheFill.Image -> Text(
+                stringResource(Res.string.icon_studio_background_image_set_hint),
+                fontFamily = font,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Normal,
+                color = accents.primary,
+            )
         }
     }
 }
+
+@Composable
+private fun SwatchRow(selected: Int, onPick: (Int) -> Unit) = MorpheSwatchRow(selected, onPick = onPick)
+
+@Composable
+private fun AdjustRow(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    decimals: Int,
+    font: FontFamily,
+    accents: MorpheAccentColors,
+    onChange: (Float) -> Unit,
+) = MorpheAdjustRow(label = label, value = value, range = range, font = font, decimals = decimals, onChange = onChange)
 
 @Composable
 private fun TextInput(value: String, font: FontFamily, accents: MorpheAccentColors, placeholder: String = "", onValue: (String) -> Unit) {
@@ -733,7 +670,7 @@ private fun TextInput(value: String, font: FontFamily, accents: MorpheAccentColo
     LaunchedEffect(value) { if (text != value) text = value }
     val corners = LocalMorpheCorners.current
     Row(Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(corners.small)).border(1.dp, accents.primary.copy(alpha = 0.25f), RoundedCornerShape(corners.small)).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
             if (text.isEmpty() && placeholder.isNotEmpty()) {
                 Text(placeholder, fontSize = 11.sp, fontWeight = FontWeight.Normal, lineHeight = 14.sp, fontFamily = font, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
@@ -750,12 +687,15 @@ private fun SymBtn(icon: ImageVector, accents: MorpheAccentColors, onClick: () -
 }
 
 @Composable
-private fun Toggle(text: String, active: Boolean, accents: MorpheAccentColors, font: FontFamily, dense: Boolean = false, onClick: () -> Unit) {
-    val corners = LocalMorpheCorners.current
-    Box(Modifier.clip(RoundedCornerShape(corners.small)).background(if (active) accents.primary.copy(alpha = 0.2f) else Color.Transparent).border(1.dp, accents.primary.copy(alpha = if (active) 0.6f else 0.2f), RoundedCornerShape(corners.small)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = if (dense) 2.dp else 4.dp)) {
-        Text(text, fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Normal, color = if (active) accents.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
+private fun Toggle(
+    text: String,
+    active: Boolean,
+    accents: MorpheAccentColors,
+    font: FontFamily,
+    dense: Boolean = false,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) = MorpheChoiceChip(text = text, active = active, font = font, dense = dense, icon = icon, onClick = onClick)
 
 private fun DrawScope.drawPreview(bitmap: ImageBitmap?) {
     if (bitmap == null) return
@@ -765,15 +705,16 @@ private fun DrawScope.drawPreview(bitmap: ImageBitmap?) {
 
 /**
  * A realistic status bar showing the actual monochrome notification silhouette (with the
- * clipped-slot guide) between the clock and the system icons — this is the output most
+ * clipped-slot guide) between the clock and the system icons. This is the output most
  * easily gotten wrong, mirroring how morphe-manager previews it.
  */
 @Composable
 private fun StatusBarPreview(silhouette: ImageBitmap?, font: FontFamily) {
+    val corners = LocalMorpheCorners.current
     val onSurface = MaterialTheme.colorScheme.onSurface
-    Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(12.dp))
+    Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(corners.medium))
         .background(MaterialTheme.colorScheme.surfaceVariant)
-        .border(1.dp, onSurface.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+        .border(1.dp, onSurface.copy(alpha = 0.1f), RoundedCornerShape(corners.medium))
         .padding(horizontal = 14.dp)) {
         Row(Modifier.align(Alignment.CenterStart), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("9:41", fontFamily = font, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = onSurface)
@@ -790,24 +731,22 @@ private fun StatusBarPreview(silhouette: ImageBitmap?, font: FontFamily) {
     }
 }
 
-// ── Templates (starting points; the user then adds/edits layers) ──
-
 private fun templateGradient() = IconProject(
-    background = IconProject.Background.Gradient(
-        stops = listOf(IconProject.Background.Stop(0f, 0xFF00E5FF.toInt()), IconProject.Background.Stop(1f, 0xFF7C4DFF.toInt())),
-        type = IconProject.GradientType.RADIAL,
+    background = MorpheFill.Gradient(
+        stops = listOf(MorpheFill.Stop(0f, 0xFF00E5FF.toInt()), MorpheFill.Stop(1f, 0xFF7C4DFF.toInt())),
+        type = GradientType.RADIAL,
     ),
 )
 
 private fun templateBadge() = IconProject(
-    background = IconProject.Background.Solid(0xFF1DE9B6.toInt()),
+    background = MorpheFill.Solid(0xFF1DE9B6.toInt()),
     layers = listOf(IconProject.Layer(System.nanoTime().toString(), IconProject.LayerContent.Text("A", 0xFF102027.toInt(), true), scale = 0.6f)),
 )
 
 private fun templateShape() = IconProject(
-    background = IconProject.Background.Gradient(
-        stops = listOf(IconProject.Background.Stop(0f, 0xFFFF6D00.toInt()), IconProject.Background.Stop(1f, 0xFFFF0033.toInt())),
-        type = IconProject.GradientType.RADIAL,
+    background = MorpheFill.Gradient(
+        stops = listOf(MorpheFill.Stop(0f, 0xFFFF6D00.toInt()), MorpheFill.Stop(1f, 0xFFFF0033.toInt())),
+        type = GradientType.RADIAL,
     ),
     layers = listOf(IconProject.Layer(System.nanoTime().toString(), IconProject.LayerContent.Shape(IconProject.ShapeKind.CIRCLE, 0xFFFFFFFF.toInt()), scale = 0.5f)),
 )

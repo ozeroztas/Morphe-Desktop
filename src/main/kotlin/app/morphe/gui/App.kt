@@ -13,12 +13,16 @@ import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import app.morphe.gui.ui.components.CardFillHost
+import app.morphe.gui.data.model.MorpheFill
 import app.morphe.gui.data.repository.ActiveMode
 import app.morphe.gui.data.repository.ConfigRepository
 import app.morphe.gui.data.repository.PatchSourceManager
+import app.morphe.gui.data.repository.isRtlLanguage
 import app.morphe.gui.di.appModule
 import app.morphe.gui.ui.components.LocalFrameWindowScope
 import app.morphe.gui.ui.components.SettingsDialogHost
@@ -36,10 +40,10 @@ import app.morphe.gui.ui.theme.desktopScreenEnter
 import app.morphe.gui.ui.theme.desktopScreenExit
 import app.morphe.gui.util.DeviceMonitor
 import app.morphe.gui.util.Logger
-import app.morphe.gui.util.PatchService
 import app.morphe.gui.util.applyTitleBarTint
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.transitions.ScreenTransition
+import java.util.Locale
 import kotlinx.coroutines.launch
 import org.koin.compose.KoinApplication
 import org.koin.compose.koinInject
@@ -47,6 +51,18 @@ import org.koin.core.logger.Level as KoinLevel
 import org.koin.core.logger.Logger as KoinLogger
 import org.koin.core.logger.MESSAGE
 import org.koin.dsl.koinConfiguration
+
+private val systemDefaultLocale = Locale.getDefault()
+
+private fun applyLocale(language: String) {
+    Locale.setDefault(
+        if (language.isNotBlank() && language != "system") {
+            Locale.forLanguageTag(language)
+        } else {
+            systemDefaultLocale
+        }
+    )
+}
 
 /**
  * Mode state for switching between simplified and full mode.
@@ -58,6 +74,15 @@ data class ModeState(
 
 val LocalModeState = staticCompositionLocalOf<ModeState> {
     error("No ModeState provided")
+}
+
+data class LanguageState(
+    val current: String,
+    val onChange: (String) -> Unit
+)
+
+val LocalLanguageState = staticCompositionLocalOf<LanguageState> {
+    error("No LanguageState provided")
 }
 
 val LocalSettingsDialogVisible = compositionLocalOf<MutableState<Boolean>> {
@@ -83,6 +108,14 @@ val LocalPatchingCompleted = compositionLocalOf { mutableStateOf(false) }
 
 val LocalCustomAccentColor = compositionLocalOf<MutableState<Int?>> {
     error("No LocalCustomAccentColor provided") 
+}
+
+val LocalSharpCorners = compositionLocalOf<MutableState<Boolean>> {
+    error("No LocalSharpCorners provided")
+}
+
+val LocalGroupPatchesByCategory = compositionLocalOf<MutableState<Boolean>> {
+    error("No LocalGroupPatchesByCategory provided")
 }
 
 /**
@@ -144,9 +177,14 @@ private fun appContent(
 
     var themePreference by remember { mutableStateOf(ThemePreference.SYSTEM) }
     var isSimplifiedMode by remember { mutableStateOf(initialSimplifiedMode) }
+    var appLanguage by remember { mutableStateOf("system") }
     var autoStartAdb by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     val backgroundTypeState = remember { mutableStateOf(BackgroundType.CIRCLES) }
+    var cardFills by remember { mutableStateOf(emptyMap<String, MorpheFill>()) }
+    var globalCardFill by remember { mutableStateOf<MorpheFill?>(null) }
+    val sharpCornersState = remember { mutableStateOf(false) }
+    val groupPatchesByCategoryState = remember { mutableStateOf(true) }
     val backgroundSpeedState = remember { mutableFloatStateOf(1f) }
     val patchingCompletedState = remember { mutableStateOf(false) }
 
@@ -156,12 +194,19 @@ private fun appContent(
         val config = configRepository.loadConfig()
         themePreference = config.getThemePreference()
         isSimplifiedMode = config.useSimplifiedMode
+        groupPatchesByCategoryState.value = config.groupPatchesByCategory
         backgroundTypeState.value = try {
             BackgroundType.valueOf(config.backgroundType)
         } catch (e: Exception) {
             BackgroundType.CIRCLES
         }
         enableParallaxState.value = config.enableParallax
+        cardFills = config.cardFills
+        globalCardFill = config.globalCardFill
+        sharpCornersState.value = config.useSharpCorners
+
+        appLanguage = config.language
+        applyLocale(config.language)
 
         autoStartAdb = config.autoStartAdb
         // Publish the initial active mode BEFORE the VMs subscribe so their
@@ -191,8 +236,8 @@ private fun appContent(
     val onModeChange: (Boolean) -> Unit = { simplified ->
         isSimplifiedMode = simplified
         // Update the manager immediately so the now-visible mode's VM
-        // starts reacting to source changes and the now-hidden one stops —
-        // prevents duplicate parallel loads and the cancellation cascade
+        // starts reacting to source changes and the now-hidden one stops.
+        // That prevents duplicate parallel loads and the cancellation cascade
         // that comes with them.
         patchSourceManager.setActiveMode(
             if (simplified) ActiveMode.QUICK else ActiveMode.EXPERT
@@ -205,7 +250,7 @@ private fun appContent(
 
     // Callback for the auto-start ADB toggle. Persists the preference AND
     // applies the change immediately: ON spins up DeviceMonitor (which
-    // explicitly start-server's adb and records ownership); OFF cancels
+    // explicitly start-server's adb and records ownership). OFF cancels
     // polling and kill-server's the daemon if Morphe owns it.
     val onAutoStartAdbChange: (Boolean) -> Unit = { enabled ->
         autoStartAdb = enabled
@@ -220,6 +265,11 @@ private fun appContent(
         }
     }
 
+    val onLanguageChange: (String) -> Unit = { newLang ->
+        appLanguage = newLang
+        applyLocale(newLang)
+    }
+
     val themeState = ThemeState(
         current = themePreference,
         onChange = onThemeChange
@@ -228,6 +278,11 @@ private fun appContent(
     val modeState = ModeState(
         isSimplified = isSimplifiedMode,
         onChange = onModeChange
+    )
+
+    val languageState = LanguageState(
+        current = appLanguage,
+        onChange = onLanguageChange
     )
 
     val adbPreferenceState = AdbPreferenceState(
@@ -256,83 +311,112 @@ private fun appContent(
     val settingsDialogVisible = remember { mutableStateOf(false) }
     val isPatchingState = remember { mutableStateOf(false) }
 
-    MorpheTheme(themePreference = themePreference, customAccentColorArgb = customAccentColorState.value) {
-        CompositionLocalProvider(
-            LocalThemeState provides themeState,
-            LocalModeState provides modeState,
-            LocalAdbPreference provides adbPreferenceState,
-            LocalSettingsDialogVisible provides settingsDialogVisible,
-            LocalIsPatching provides isPatchingState,
-            LocalBackgroundType provides backgroundTypeState,
-            LocalEnableParallax provides enableParallaxState,
-            LocalParallaxState provides parallaxState,
-            LocalCustomAccentColor provides customAccentColorState,
-            LocalBackgroundSpeed provides backgroundSpeedState,
-            LocalPatchingCompleted provides patchingCompletedState
+    val targetDirection = if (appLanguage.isRtlLanguage()) LayoutDirection.Rtl else LayoutDirection.Ltr
+
+    CompositionLocalProvider(LocalLayoutDirection provides targetDirection) {
+        MorpheTheme(
+            themePreference = themePreference,
+            customAccentColorArgb = customAccentColorState.value,
+            useSharpCorners = sharpCornersState.value
         ) {
-            // Tint the OS title bar (Windows DWM caption color, macOS traffic
-            // light contrast) to match the active theme's surface color.
-            val titleBarColor = MaterialTheme.colorScheme.surface
-            val frameScope = LocalFrameWindowScope.current
-            LaunchedEffect(titleBarColor, frameScope) {
-                frameScope?.window?.let { applyTitleBarTint(it, titleBarColor) }
-            }
-
-            // macOS only: render a 28dp colored band at the very top of the
-            // window, sitting underneath the (now-transparent) OS title bar.
-            // The traffic lights overlay this band at their default position.
-            // Wrapped in WindowDraggableArea so the band acts as a drag region.
-            val isMac = remember {
-                System.getProperty("os.name")?.lowercase()?.contains("mac") == true
-            }
-
-            Surface(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    if (isMac && frameScope != null) {
-                        with(frameScope) {
-                            WindowDraggableArea {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(16.dp)
-                                        .background(titleBarColor)
-                                )
-                            }
+            CompositionLocalProvider(
+                LocalThemeState provides themeState,
+                LocalLanguageState provides languageState,
+                LocalModeState provides modeState,
+                LocalAdbPreference provides adbPreferenceState,
+                LocalSettingsDialogVisible provides settingsDialogVisible,
+                LocalIsPatching provides isPatchingState,
+                LocalBackgroundType provides backgroundTypeState,
+                LocalEnableParallax provides enableParallaxState,
+                LocalParallaxState provides parallaxState,
+                LocalCustomAccentColor provides customAccentColorState,
+                LocalSharpCorners provides sharpCornersState,
+                LocalGroupPatchesByCategory provides groupPatchesByCategoryState,
+                LocalBackgroundSpeed provides backgroundSpeedState,
+                LocalPatchingCompleted provides patchingCompletedState
+            ) {
+                CardFillHost(
+                    fills = cardFills,
+                    globalFill = globalCardFill,
+                    onChange = { pkg, fill ->
+                        cardFills = cardFills.toMutableMap().apply {
+                            if (fill == null) remove(pkg) else put(pkg, fill)
                         }
+                        scope.launch { configRepository.setCardFill(pkg, fill) }
+                    },
+                    onGlobalChange = { fill ->
+                        globalCardFill = fill
+                        scope.launch { configRepository.setGlobalCardFill(fill) }
+                    },
+                    onClearAll = {
+                        cardFills = emptyMap()
+                        scope.launch { configRepository.clearCardFills() }
+                    },
+                ) {
+                    // Tint the OS title bar (Windows DWM caption color, macOS traffic
+                    // light contrast) to match the active theme's surface color.
+                    val titleBarColor = MaterialTheme.colorScheme.surface
+                    val frameScope = LocalFrameWindowScope.current
+                    LaunchedEffect(titleBarColor, frameScope) {
+                        frameScope?.window?.let { applyTitleBarTint(it, titleBarColor) }
                     }
 
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f).then(parallaxMod)) {
-                        AnimatedBackground(
-                            type = backgroundTypeState.value,
-                            enableParallax = enableParallaxState.value,
-                            speedMultiplier = { backgroundSpeedState.floatValue },
-                            patchingCompleted = { patchingCompletedState.value }
-                        )
+                    // macOS only: render a 28dp colored band at the very top of the
+                    // window, sitting underneath the (now-transparent) OS title bar.
+                    // The traffic lights overlay this band at their default position.
+                    // Wrapped in WindowDraggableArea so the band acts as a drag region.
+                    val isMac = remember {
+                        System.getProperty("os.name")?.lowercase()?.contains("mac") == true
+                    }
 
-                        // Dialog host lives outside the Crossfade so the
-                        // SettingsDialog composable is never torn down when
-                        // the user toggles Expert Mode.
-                        SettingsDialogHost()
-
-                        if (!isLoading) {
-                            val initialScreen = remember {
-                                if (isSimplifiedMode) QuickPatchScreen() else HomeScreen()
-                            }
-
-                            Navigator(initialScreen) { navigator ->
-                                LaunchedEffect(isSimplifiedMode) {
-                                    val isCurrentlyQuick = navigator.lastItem is QuickPatchScreen
-                                    if (isSimplifiedMode && !isCurrentlyQuick) {
-                                        navigator.replaceAll(QuickPatchScreen())
-                                    } else if (!isSimplifiedMode && isCurrentlyQuick) {
-                                        navigator.replaceAll(HomeScreen())
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (isMac && frameScope != null) {
+                                with(frameScope) {
+                                    WindowDraggableArea {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(16.dp)
+                                                .background(titleBarColor)
+                                        )
                                     }
                                 }
+                            }
 
-                                ScreenTransition(
-                                    navigator = navigator,
-                                    transition = { desktopScreenEnter togetherWith desktopScreenExit }
+                            Box(modifier = Modifier.fillMaxWidth().weight(1f).then(parallaxMod)) {
+                                AnimatedBackground(
+                                    type = backgroundTypeState.value,
+                                    enableParallax = enableParallaxState.value,
+                                    speedMultiplier = { backgroundSpeedState.floatValue },
+                                    patchingCompleted = { patchingCompletedState.value }
                                 )
+
+                                key(appLanguage) {
+                                    SettingsDialogHost()
+                                }
+
+                                if (!isLoading) {
+                                    val initialScreen = remember {
+                                        if (isSimplifiedMode) QuickPatchScreen() else HomeScreen()
+                                    }
+
+                                    Navigator(initialScreen) { navigator ->
+                                        LaunchedEffect(isSimplifiedMode) {
+                                            val isCurrentlyQuick = navigator.lastItem is QuickPatchScreen
+                                            if (isSimplifiedMode && !isCurrentlyQuick) {
+                                                navigator.replaceAll(QuickPatchScreen())
+                                            } else if (!isSimplifiedMode && isCurrentlyQuick) {
+                                                navigator.replaceAll(HomeScreen())
+                                            }
+                                        }
+
+                                        ScreenTransition(
+                                            navigator = navigator,
+                                            transition = { desktopScreenEnter togetherWith desktopScreenExit }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

@@ -5,21 +5,30 @@
 
 package app.morphe.gui.util
 
+import androidx.compose.runtime.Composable
+import app.morphe.engine.GitHubPatMissingException
 import app.morphe.engine.MultiSourceLoader
 import app.morphe.engine.model.Release
+import app.morphe.engine.patches.PatchBundleLoader
+import app.morphe.engine.patches.PullRequestPatchSource
 import app.morphe.gui.data.model.FollowMode
 import app.morphe.gui.data.model.Patch
 import app.morphe.gui.data.model.PatchSource
 import app.morphe.gui.data.model.PatchSourceType
 import app.morphe.gui.data.model.SourceVersionPref
 import app.morphe.gui.data.repository.PatchRepository
+import app.morphe.morphe_desktop.generated.resources.*
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * GUI-side orchestrator that resolves each enabled patch source to a downloaded
@@ -29,14 +38,14 @@ import kotlinx.coroutines.withContext
  *
  * The single-source case (one enabled source) produces output equivalent to the
  * pre-multi-source per-ViewModel flow. Per-source version pinning via
- * [preferredVersionsBySource] keeps each source independent — picking a tag in
+ * [preferredVersionsBySource] keeps each source independent. Picking a tag in
  * one source's PatchesScreen does NOT contaminate other sources.
  */
 object EnabledSourcesLoader {
 
     /**
      * Per-source resolution result before patch-loading. Successful sources have
-     * a [patchFile]; failed ones have an [error] message and the UI can render
+     * a [patchFile]. Failed ones have an [error] message and the UI can render
      * the failure inline.
      */
     /** What channel the resolved release is on. Used by the home pill LEDs and
@@ -49,7 +58,7 @@ object EnabledSourcesLoader {
         val resolvedVersion: String? = null,
         /**
          * Newest available release tag in the resolved channel (stable/dev),
-         * regardless of what's currently downloaded — lets the UI flag "a newer
+         * regardless of what's currently downloaded. Lets the UI flag "a newer
          * patch file is available" without the user having to select it first.
          * Null when unknown (offline / cache fallback).
          */
@@ -57,7 +66,12 @@ object EnabledSourcesLoader {
         val isOffline: Boolean = false,
         val error: String? = null,
         val channel: Channel = Channel.UNKNOWN,
-    )
+        val errorRes: StringResource? = null,
+        val errorArgs: List<Any> = emptyList(),
+    ) {
+        suspend fun getUserErrorMessage(): String? =
+            errorRes?.let { getString(it, *errorArgs.toTypedArray()) } ?: error
+    }
 
     data class Result(
         /** Resolution outcome per source (success or failure). */
@@ -70,7 +84,6 @@ object EnabledSourcesLoader {
         val guiPatchesBySource: Map<String, List<Patch>>,
     ) {
         val anyLoaded: Boolean get() = loaded.allPatches.isNotEmpty()
-        val anyFailed: Boolean get() = resolved.any { it.error != null } || loaded.hasErrors
     }
 
     /**
@@ -85,16 +98,17 @@ object EnabledSourcesLoader {
         patchService: PatchService,
         prefsBySource: Map<String, SourceVersionPref> = emptyMap(),
         excludedMppPatterns: List<String> = emptyList(),
+        onDownloadProgress: ((String, Float) -> Unit)? = null,
     ): Result = supervisorScope {
         // supervisorScope (not coroutineScope) so a single source's failure
         // doesn't cancel the other in-flight resolves. Each async catches its
-        // own exceptions and returns a failed ResolvedSource — failures
+        // own exceptions and returns a failed ResolvedSource. Failures
         // become data, not control flow. Cancellation still propagates from
         // the caller (e.g. ViewModel cancelling its loadJob).
         val resolved = enabled.map { (source, repo) ->
             async(Dispatchers.IO) {
                 try {
-                    resolve(source, repo, prefsBySource[source.id], excludedMppPatterns)
+                    resolve(source, repo, prefsBySource[source.id], excludedMppPatterns, onDownloadProgress)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -143,6 +157,7 @@ object EnabledSourcesLoader {
         repo: PatchRepository?,
         pref: SourceVersionPref?,
         excludedMppPatterns: List<String>,
+        onDownloadProgress: ((String, Float) -> Unit)? = null,
     ): ResolvedSource = withContext(Dispatchers.IO) {
         when (source.type) {
             PatchSourceType.LOCAL -> resolveLocal(source, excludedMppPatterns)
@@ -151,32 +166,47 @@ object EnabledSourcesLoader {
             // which API to talk to based on the source's provider type.
             PatchSourceType.DEFAULT,
             PatchSourceType.GITHUB,
-            PatchSourceType.GITLAB -> resolveRemote(source, repo, pref)
+            PatchSourceType.GITLAB -> resolveRemote(source, repo, pref, onDownloadProgress)
         }
     }
 
     private fun resolveLocal(source: PatchSource, excludedMppPatterns: List<String>): ResolvedSource {
         val path = source.filePath
         if (path.isNullOrBlank()) {
-            return ResolvedSource(source = source, error = "Local source has no file path configured")
+            return ResolvedSource(
+                source = source,
+                error = "Local source path is empty",
+                errorRes = Res.string.source_error_local_no_path,
+            )
         }
         val target = File(path)
         if (!target.exists()) {
-            return ResolvedSource(source = source, error = "Local patch path not found: ${target.name}")
+            return ResolvedSource(
+                source = source,
+                error = "Local source file not found: ${target.name}",
+                errorRes = Res.string.source_error_local_not_found,
+                errorArgs = listOf(target.name),
+            )
         }
         // Folder source (patch-developer mode): auto-resolve the NEWEST .mpp in the
         // directory. This is re-evaluated on every load, so rebuilding a patch is
         // picked up on the next (re)load without touching the file picker.
         val file = if (target.isDirectory) {
             newestMppIn(target, excludedMppPatterns)
-                ?: return ResolvedSource(source = source, error = "No .mpp files found in folder: ${target.name}")
+                ?: return ResolvedSource(
+                    source = source,
+                    error = "No .mpp patch file found in ${target.name}",
+                    errorRes = Res.string.source_error_local_no_mpp,
+                    errorArgs = listOf(target.name),
+                )
         } else {
             target
         }
+        val manifestVersion = PatchBundleLoader.extractVersion(file)
         return ResolvedSource(
             source = source,
             patchFile = file,
-            resolvedVersion = file.nameWithoutExtension,
+            resolvedVersion = manifestVersion ?: file.nameWithoutExtension,
             isOffline = false,
             // A local file has no release channel, so tag it LOCAL rather than letting
             // it fall through to the STABLE_LATEST default used for remote sources.
@@ -187,7 +217,7 @@ object EnabledSourcesLoader {
     /**
      * Build-output classifiers a patch build emits *alongside* the real bundle (same
      * convention as Maven's `-sources.jar` / `-javadoc.jar`). Never the patch file we
-     * want, yet often the newest files in the folder — so a naive "newest .mpp" would
+     * want, yet often the newest files in the folder. So a naive "newest .mpp" would
      * wrongly pick one. Always excluded, on top of any user-configured patterns.
      */
     private val DEFAULT_EXCLUDED_MPP_GLOBS = listOf("*-sources.mpp", "*-javadoc.mpp")
@@ -240,32 +270,78 @@ object EnabledSourcesLoader {
         source: PatchSource,
         repo: PatchRepository?,
         pref: SourceVersionPref?,
+        onDownloadProgress: ((String, Float) -> Unit)? = null,
     ): ResolvedSource {
         if (repo == null) {
-            return ResolvedSource(source = source, error = "No repository configured for source")
+            return ResolvedSource(
+                source = source,
+                error = "No repository configured for source ${source.name}",
+                errorRes = Res.string.source_error_no_repository,
+            )
         }
 
         // Resolve the target release WITHOUT the releases API where possible:
-        //  - FOLLOW_STABLE / default / FOLLOW_DEV → latest via the raw patches-bundle.json.
-        //    getLatest*Release is manifest-first (it only touches the API if the source
-        //    ships no manifest), so following sources cost 0 API calls on startup.
+        //  - Not pinned → latest via the raw patches-bundle.json, with the channel
+        //    coming from PatchSource.usePreRelease. getLatest*Release is manifest-first
+        //    (it only touches the API if the source ships no manifest), so following
+        //    sources cost 0 API calls on startup.
         //  - PINNED → needs the full release list (API) to locate the exact old tag.
+        val isPrSource = repo.remoteSource is PullRequestPatchSource
         val release: Release?
         val latestStableTag: String?
         val latestDevTag: String?
 
         if (pref?.mode == FollowMode.PINNED) {
-            val releases = repo.fetchReleases().getOrNull()
-            if (releases.isNullOrEmpty()) return offlineOrError(source, repo)
+            val releasesResult = repo.fetchReleases()
+            val releases = releasesResult.getOrNull()
+            if (releases.isNullOrEmpty()) {
+                if (isPrSource) {
+                    val ex = releasesResult.exceptionOrNull()
+                    val errorRes = when {
+                        ex is GitHubPatMissingException || ex?.message?.contains("A GitHub PAT is required", ignoreCase = true) == true ->
+                            Res.string.source_error_github_pat_required
+                        ex?.message?.contains("No artifacts found", ignoreCase = true) == true ||
+                            ex?.message?.contains("No GitHub Actions run found", ignoreCase = true) == true ->
+                            Res.string.source_error_pr_no_artifact
+                        else -> null
+                    }
+                    return ResolvedSource(
+                        source = source,
+                        error = ex?.message ?: "No artifacts found for pull request",
+                        errorRes = errorRes,
+                    )
+                }
+                return offlineOrError(source, repo)
+            }
             val latestStable = releases.firstOrNull { !it.isDevRelease() }
             release = releases.find { it.tagName == pref.pinnedTag } ?: latestStable ?: releases.firstOrNull()
             latestStableTag = latestStable?.tagName
             latestDevTag = releases.firstOrNull { it.isDevRelease() }?.tagName
         } else {
-            val stable = repo.getLatestStableRelease().getOrNull()
-            val dev = repo.getLatestDevRelease().getOrNull()
-            val wantsDev = source.usePreRelease
-            release = if (wantsDev) (dev ?: stable) else (stable ?: dev)
+            val (stableResult, devResult) = coroutineScope {
+                val stableAsync = async { repo.getLatestStableRelease() }
+                val devAsync = async { repo.getLatestDevRelease() }
+                stableAsync.await() to devAsync.await()
+            }
+            val stable = stableResult.getOrNull()
+            val dev = devResult.getOrNull()
+            if (isPrSource && dev == null && stable == null) {
+                val ex = devResult.exceptionOrNull() ?: stableResult.exceptionOrNull()
+                val errorRes = when {
+                    ex is GitHubPatMissingException || ex?.message?.contains("A GitHub PAT is required", ignoreCase = true) == true ->
+                        Res.string.source_error_github_pat_required
+                    ex?.message?.contains("No artifacts found", ignoreCase = true) == true ||
+                        ex?.message?.contains("No GitHub Actions run found", ignoreCase = true) == true ->
+                        Res.string.source_error_pr_no_artifact
+                    else -> null
+                }
+                return ResolvedSource(
+                    source = source,
+                    error = ex?.message ?: "No artifacts found for pull request",
+                    errorRes = errorRes,
+                )
+            }
+            release = if (source.usePreRelease) newerRelease(dev, stable) else (stable ?: dev)
             latestStableTag = stable?.tagName
             latestDevTag = dev?.tagName
         }
@@ -282,19 +358,39 @@ object EnabledSourcesLoader {
             else -> Channel.STABLE_OLDER
         }
 
-        val downloadResult = repo.downloadPatches(release)
+        val downloadResult = repo.downloadPatches(release) { pct ->
+            onDownloadProgress?.invoke(source.name, pct)
+        }
         val patchFile = downloadResult.getOrNull()
-            ?: return ResolvedSource(
-                source = source,
-                error = "Could not download patches: ${downloadResult.exceptionOrNull()?.message}",
-            )
+            ?: run {
+                val ex = downloadResult.exceptionOrNull()
+                val errorRes = when {
+                    ex is GitHubPatMissingException || ex?.message?.contains("A GitHub PAT is required", ignoreCase = true) == true ->
+                        Res.string.source_error_github_pat_required
+                    ex?.message?.contains("No artifacts found", ignoreCase = true) == true ||
+                        ex?.message?.contains("No GitHub Actions run found", ignoreCase = true) == true ->
+                        Res.string.source_error_pr_no_artifact
+                    else -> null
+                }
+                return ResolvedSource(
+                    source = source,
+                    error = ex?.message ?: "",
+                    errorRes = errorRes,
+                )
+            }
+
+        val manifestVersion = PatchBundleLoader.extractVersion(patchFile)
+        val resolvedVersion = if (isPrSource) {
+            manifestVersion ?: release.tagName
+        } else {
+            release.tagName
+        }
 
         return ResolvedSource(
             source = source,
             patchFile = patchFile,
-            resolvedVersion = release.tagName,
-            // Latest in the resolved channel — what an "update" would move to.
-            latestAvailableVersion = if (release.isDevRelease()) latestDevTag else latestStableTag,
+            resolvedVersion = resolvedVersion,
+            latestAvailableVersion = if (isPrSource) resolvedVersion else (if (release.isDevRelease()) latestDevTag else latestStableTag),
             isOffline = false,
             channel = channel,
         )
@@ -304,22 +400,42 @@ object EnabledSourcesLoader {
     private fun offlineOrError(source: PatchSource, repo: PatchRepository): ResolvedSource {
         val cached = findCachedPatchFile(repo)
         return if (cached != null) {
+            val isPrSource = repo.remoteSource is PullRequestPatchSource
+            val manifestVersion = PatchBundleLoader.extractVersion(cached)
+            val resolvedVersion = if (isPrSource) {
+                manifestVersion ?: versionFromFilename(cached)
+            } else {
+                versionFromFilename(cached)
+            }
             ResolvedSource(
                 source = source,
                 patchFile = cached,
-                resolvedVersion = versionFromFilename(cached),
+                resolvedVersion = resolvedVersion,
+                latestAvailableVersion = if (isPrSource) resolvedVersion else null,
                 isOffline = true,
             )
         } else {
-            ResolvedSource(source = source, error = "Could not fetch releases")
+            ResolvedSource(
+                source = source,
+                error = "Failed to fetch releases",
+                errorRes = Res.string.source_error_fetch_releases,
+            )
         }
     }
 
     private fun findCachedPatchFile(repo: PatchRepository): File? {
         val cacheDir = repo.getCacheDir()
+        val prSource = repo.remoteSource as? PullRequestPatchSource
+        val prPrefix = prSource?.let { "pr-${it.prNumber}-" }
         return cacheDir.listFiles { file ->
             val ext = file.extension.lowercase()
-            (ext == "mpp" || ext == "jar") && file.length() > 0
+            val isMpp = (ext == "mpp" || ext == "jar") && file.length() > 0
+            if (!isMpp) return@listFiles false
+            if (prPrefix != null) {
+                file.name.startsWith(prPrefix)
+            } else {
+                !file.name.startsWith("pr-")
+            }
         }?.maxByOrNull { it.lastModified() }
     }
 
@@ -352,13 +468,17 @@ fun EnabledSourcesLoader.Result?.sourceChannelMap(): Map<String, EnabledSourcesL
  * fetch or find an .mpp) and the load phase (found one, couldn't read it), so a
  * partial multi-source failure shows exactly which source broke and why.
  */
+@Composable
 fun EnabledSourcesLoader.Result?.sourceErrorMap(): Map<String, String> {
     val snapshot = this ?: return emptyMap()
     return buildMap {
-        snapshot.resolved.forEach { r -> r.error?.let { put(r.source.id, it) } }
+        snapshot.resolved.forEach { r ->
+            val msg = r.errorRes?.let { stringResource(it, *r.errorArgs.toTypedArray()) } ?: r.error
+            msg?.let { put(r.source.id, it) }
+        }
         snapshot.loaded.perSource.forEach { s ->
             if (!s.isSuccess) {
-                put(s.sourceId, s.error?.let { humanizePatchLoadError(it) } ?: "Failed to load")
+                put(s.sourceId, s.error?.let { resolvePatchLoadError(it) } ?: stringResource(Res.string.source_error_failed_to_load))
             }
         }
     }

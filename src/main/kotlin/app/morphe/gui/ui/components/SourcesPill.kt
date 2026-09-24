@@ -24,8 +24,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +35,9 @@ import app.morphe.gui.ui.theme.LocalMorpheDimens
 import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.channelColor
 import app.morphe.gui.util.EnabledSourcesLoader
+import app.morphe.morphe_desktop.generated.resources.*
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 
 /** Per-source LED state surfaced in [SourcesCountPill]. */
 enum class SourceLedState { DISABLED, STABLE_LATEST, STABLE_OLDER, DEV_LATEST, DEV_OLDER, LOCAL, ERROR }
@@ -44,7 +45,7 @@ enum class SourceLedState { DISABLED, STABLE_LATEST, STABLE_OLDER, DEV_LATEST, D
 /**
  * Header pill showing source count + per-source channel LEDs + trailing "+".
  * Used in expert mode (clickable, opens [SourceManagementSheet]) and in Quick
- * Patch mode (purely informational — pass `onClick = null`).
+ * Patch mode (purely informational, pass `onClick = null`).
  */
 @Composable
 fun SourcesCountPill(
@@ -71,7 +72,7 @@ fun SourcesCountPill(
     
     val tint = MaterialTheme.colorScheme.onSurfaceVariant
     val count = sourceStates.size.coerceAtLeast(1)
-    val label = if (count == 1) "1 source" else "$count sources"
+    val label = pluralStringResource(Res.plurals.count_sources, count, count)
     Row(
         modifier = Modifier
             .height(dimens.controlHeight)
@@ -81,7 +82,7 @@ fun SourcesCountPill(
             .then(
                 if (interactive) Modifier
                     .hoverable(hoverInteraction)
-                    .pointerHoverIcon(PointerIcon.Hand)
+                    .handCursor()
                     .clickable(onClick = onClick)
                 else Modifier
             )
@@ -107,7 +108,7 @@ fun SourcesCountPill(
         if (interactive) {
             Icon(
                 imageVector = MorpheIcons.Add,
-                contentDescription = "Manage patch sources",
+                contentDescription = stringResource(Res.string.source_sheet_manage_description),
                 tint = tint,
                 modifier = Modifier.size(12.dp),
             )
@@ -149,7 +150,6 @@ fun sourceLedState(
         EnabledSourcesLoader.Channel.DEV_LATEST -> SourceLedState.DEV_LATEST
         EnabledSourcesLoader.Channel.DEV_OLDER -> SourceLedState.DEV_OLDER
         EnabledSourcesLoader.Channel.LOCAL -> SourceLedState.LOCAL
-        // No load yet — assume latest until we know otherwise.
         null, EnabledSourcesLoader.Channel.UNKNOWN -> SourceLedState.STABLE_LATEST
     }
 }

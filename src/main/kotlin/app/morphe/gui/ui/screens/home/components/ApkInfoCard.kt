@@ -29,18 +29,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.morphe.gui.ui.components.handCursor
 import app.morphe.gui.ui.icons.MorpheIcons
 import app.morphe.gui.ui.screens.home.ApkInfo
 import app.morphe.gui.ui.theme.LocalMorpheAccents
 import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalMorpheFont
-import app.morphe.gui.util.ChecksumStatus
+import app.morphe.gui.ui.theme.panelFill
 import app.morphe.gui.util.DeviceMonitor
+import app.morphe.gui.util.FormatUtils
+import app.morphe.gui.util.StatusColorType
+import app.morphe.gui.util.VersionStatus
+import app.morphe.gui.util.currentLocale
 import app.morphe.gui.util.resolveStatusColorType
 import app.morphe.gui.util.resolveVersionStatusDisplay
-import app.morphe.gui.util.StatusColorType
 import app.morphe.gui.util.toColor
-import app.morphe.gui.util.VersionStatus
+import app.morphe.morphe_desktop.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun ApkInfoCard(
@@ -71,18 +76,9 @@ fun ApkInfoCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(cardShape)
+            .background(panelFill)
             .border(1.dp, borderColor, cardShape)
-            .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
     ) {
-        // Left accent stripe
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .fillMaxHeight()
-                .background(accentColor)
-                .align(Alignment.CenterStart)
-        )
-
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -93,7 +89,6 @@ fun ApkInfoCard(
                     .padding(start = 23.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // App initial — monospace, bold, in accent
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -156,12 +151,13 @@ fun ApkInfoCard(
                         .clip(RoundedCornerShape(corners.small))
                         .background(closeBg, RoundedCornerShape(corners.small))
                         .border(1.dp, closeBorder, RoundedCornerShape(corners.small))
+                        .handCursor()
                         .clickable(onClick = onClearClick),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = MorpheIcons.Close,
-                        contentDescription = "Remove APK",
+                        contentDescription = stringResource(Res.string.home_apk_info_remove_description),
                         tint = if (isCloseHovered) MaterialTheme.colorScheme.error
                                else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
@@ -173,7 +169,7 @@ fun ApkInfoCard(
             // Surfaced when full manifest parsing failed (typically split APKs
             // like SoundCloud where base.apk references resources living in
             // other splits). Patching still works because the patcher merges
-            // splits first — this banner just tells the user the card details
+            // splits first. This banner just tells the user the card details
             // are approximate.
             if (apkInfo.hasLimitedInfo) {
                 Row(
@@ -199,9 +195,7 @@ fun ApkInfoCard(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text =
-                            "Couldn't fully read this APK's manifest (common for split bundles). " +
-                            "Details below are approximate, patching should still work",
+                        text = stringResource(Res.string.home_apk_info_limited_info_warning),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Normal,
                         fontFamily = font,
@@ -237,7 +231,7 @@ fun ApkInfoCard(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "No compatible patches found for this app. You can still proceed, but patching may have no effect",
+                        text = stringResource(Res.string.home_apk_info_unsupported_app_warning),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Normal,
                         fontFamily = font,
@@ -263,28 +257,35 @@ fun ApkInfoCard(
                 horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 TechDataCell(
-                    label = "Version",
+                    label = stringResource(Res.string.home_apk_info_version_label),
                     value = apkInfo.versionName,
                     font = font,
                     modifier = Modifier.weight(1f)
                 )
+                if (apkInfo.versionCode != null) {
+                    TechDataCell(
+                        label = stringResource(Res.string.home_apk_info_build_label),
+                        value = apkInfo.versionCode.toString(),
+                        font = font,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
                 TechDataCell(
-                    label = "Size",
-                    value = apkInfo.formattedSize,
+                    label = stringResource(Res.string.home_apk_info_size_label),
+                    value = FormatUtils.formatFileSize(apkInfo.fileSize, currentLocale()),
                     font = font,
                     modifier = Modifier.weight(1f)
                 )
                 if (apkInfo.minSdk != null) {
                     TechDataCell(
-                        label = "Min SDK",
-                        value = "API ${apkInfo.minSdk}",
+                        label = stringResource(Res.string.app_info_min_sdk_label),
+                        value = stringResource(Res.string.home_apk_info_value_api, apkInfo.minSdk),
                         font = font,
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
 
-            // ── Architectures — shown as individual tags, device arch highlighted ──
             if (apkInfo.architectures.isNotEmpty()) {
                 val deviceState by DeviceMonitor.state.collectAsState()
                 val deviceArch = deviceState.selectedDevice?.architecture
@@ -308,7 +309,7 @@ fun ApkInfoCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Arch",
+                        text = stringResource(Res.string.app_info_arch_label),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Normal,
                         fontFamily = font,
@@ -358,7 +359,7 @@ fun ApkInfoCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "From",
+                        text = stringResource(Res.string.home_apk_info_from_label),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Normal,
                         fontFamily = font,

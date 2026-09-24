@@ -34,17 +34,21 @@ import app.morphe.gui.ui.components.SourceLedState
 import app.morphe.gui.ui.components.SourcesCountPill
 import app.morphe.gui.ui.components.TopBarRow
 import app.morphe.gui.ui.components.sourceLedState
+import app.morphe.gui.ui.components.MorpheBanner
+import app.morphe.gui.ui.components.MorpheBannerAction
+import app.morphe.gui.ui.components.MorpheBannerDismiss
+import app.morphe.gui.ui.components.MorpheBannerText
+import app.morphe.gui.ui.components.MorpheBannerTone
 import app.morphe.gui.ui.icons.MorpheIcons
 import app.morphe.gui.ui.screens.home.HomeUiState
-import app.morphe.gui.ui.theme.LocalMorpheAccents
 import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.LocalThemeState
 import app.morphe.gui.ui.theme.ThemePreference
-import app.morphe.morphe_desktop.generated.resources.Res
-import app.morphe.morphe_desktop.generated.resources.morphe_dark
-import app.morphe.morphe_desktop.generated.resources.morphe_light
+import app.morphe.morphe_desktop.generated.resources.*
 import org.jetbrains.compose.resources.painterResource
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 
 // ============================================================================
 // HEADER BAR AND STATUS INDICATORS
@@ -113,7 +117,6 @@ internal fun HeaderBar(
             }
         }
 
-
         // Device indicator plus settings, inline in the header
         Box(
             modifier = Modifier
@@ -136,33 +139,12 @@ internal fun MultiSourceHintBanner(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val corners = LocalMorpheCorners.current
-    val font = LocalMorpheFont.current
-    val accents = LocalMorpheAccents.current
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(corners.small))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = "Patches from every enabled source are unioned. Manage from the sources button above",
-            fontSize = 11.sp,
-            fontFamily = font,
-            fontWeight = FontWeight.Normal,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+    MorpheBanner(modifier = modifier, tone = MorpheBannerTone.Info) {
+        MorpheBannerText(
+            text = stringResource(Res.string.home_header_multi_source_hint),
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-            Icon(
-                imageVector = MorpheIcons.Clear,
-                contentDescription = "Dismiss",
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.size(14.dp),
-            )
-        }
+        MorpheBannerDismiss(onClick = onDismiss)
     }
 }
 
@@ -178,72 +160,17 @@ internal fun SourcesFailedBanner(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val corners = LocalMorpheCorners.current
-    val font = LocalMorpheFont.current
-    val accents = LocalMorpheAccents.current
-    val warn = MaterialTheme.colorScheme.onErrorContainer
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(corners.small))
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    MorpheBanner(
+        modifier = modifier,
+        tone = MorpheBannerTone.Error,
+        icon = MorpheIcons.Warning,
     ) {
-        Icon(
-            imageVector = MorpheIcons.Warning,
-            contentDescription = null,
-            tint = warn,
-            modifier = Modifier.size(15.dp),
-        )
-        Text(
-            text = (if (count == 1) "A patch source" else "$count patch sources") +
-                " failed to load. Using the ones that loaded successfully",
-            fontSize = 11.sp,
-            fontFamily = font,
-            fontWeight = FontWeight.Normal,
-            color = warn,
+        MorpheBannerText(
+            text = pluralStringResource(Res.plurals.home_header_sources_failed, count, count),
             modifier = Modifier.weight(1f),
         )
-        // House-style pill: corners.small with an animated hover border/text, matching the
-        // update banner's actions rather than the default Material TextButton (which used a
-        // full-pill shape and no hover color change).
-        val actionHover = remember { MutableInteractionSource() }
-        val isActionHovered by actionHover.collectIsHoveredAsState()
-        val actionBorder by animateColorAsState(
-            if (isActionHovered) warn.copy(alpha = 0.5f) else warn.copy(alpha = 0.2f),
-            animationSpec = tween(150),
-        )
-        val actionText by animateColorAsState(
-            if (isActionHovered) warn else warn.copy(alpha = 0.7f),
-            animationSpec = tween(150),
-        )
-        Box(
-            modifier = Modifier
-                .height(24.dp)
-                .hoverable(actionHover)
-                .clip(RoundedCornerShape(corners.small))
-                .border(1.dp, actionBorder, RoundedCornerShape(corners.small))
-                .clickable(onClick = onManageSources)
-                .padding(horizontal = 8.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                "Manage sources",
-                fontFamily = font,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = actionText,
-            )
-        }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-            Icon(
-                imageVector = MorpheIcons.Clear,
-                contentDescription = "Dismiss",
-                tint = warn,
-                modifier = Modifier.size(14.dp),
-            )
-        }
+        MorpheBannerAction(label = stringResource(Res.string.home_header_manage_sources_button), onClick = onManageSources)
+        MorpheBannerDismiss(onClick = onDismiss)
     }
 }
 
@@ -277,7 +204,7 @@ internal fun PatchesLoadingIndicator() {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = "Loading…",
+            text = stringResource(Res.string.status_loading),
             fontSize = 11.sp,
             fontWeight = FontWeight.Normal,
             fontFamily = font,
@@ -314,7 +241,7 @@ internal fun OfflineBadge(onRetry: () -> Unit) {
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = "Offline",
+            text = stringResource(Res.string.status_offline),
             fontSize = 11.sp,
             fontWeight = FontWeight.Normal,
             fontFamily = font,
@@ -332,8 +259,7 @@ internal fun BrandingSection(isCompact: Boolean = false) {
     }
     Image(
         painter = painterResource(if (isDark) Res.drawable.morphe_dark else Res.drawable.morphe_light),
-        contentDescription = "Morphe Logo",
+        contentDescription = stringResource(Res.string.morphe_logo_content_description),
         modifier = Modifier.height(if (isCompact) 36.dp else 60.dp)
     )
 }
-

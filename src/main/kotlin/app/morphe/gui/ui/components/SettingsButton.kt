@@ -12,7 +12,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -32,6 +31,7 @@ import app.morphe.engine.UpdateChecker
 import app.morphe.gui.LocalAdbPreference
 import app.morphe.gui.LocalCustomAccentColor
 import app.morphe.gui.LocalIsPatching
+import app.morphe.gui.LocalLanguageState
 import app.morphe.gui.LocalModeState
 import app.morphe.gui.LocalOnSettingsDismiss
 import app.morphe.gui.LocalOnUpdateChannelChanged
@@ -43,7 +43,9 @@ import app.morphe.gui.ui.icons.MorpheIcons
 import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalThemeState
 import app.morphe.gui.util.Logger
+import app.morphe.morphe_desktop.generated.resources.*
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 
 @Composable
@@ -57,6 +59,7 @@ fun SettingsDialogHost() {
 
     val themeState = LocalThemeState.current
     val modeState = LocalModeState.current
+    val languageState = LocalLanguageState.current
     val adbPreference = LocalAdbPreference.current
     val configRepository: ConfigRepository = koinInject()
     val updateCheckRepository: UpdateCheckRepository = koinInject()
@@ -75,13 +78,14 @@ fun SettingsDialogHost() {
     var autoRouteLinksAfterInstall by remember { mutableStateOf(false) }
     var disableStockLinksAfterInstall by remember { mutableStateOf(false) }
     var developerOptions by remember { mutableStateOf(false) }
+    var gitHubPat by remember { mutableStateOf("") }
 
     LaunchedEffect(showSettingsDialog) {
         if (showSettingsDialog) {
             val config = configRepository.loadConfig()
             autoCleanupTempFiles = config.autoCleanupTempFiles
             // Display the resolved absolute form even though storage may be
-            // bundle-relative — users expect to see a real filesystem path in
+            // bundle-relative. Users expect to see a real filesystem path in
             // the field, not a cryptic basename.
             defaultOutputDirectory = config.resolvedDefaultOutputDirectory()?.absolutePath
             keystorePath = config.resolvedKeystorePath()?.absolutePath
@@ -93,6 +97,7 @@ fun SettingsDialogHost() {
             autoRouteLinksAfterInstall = config.autoRouteLinksAfterInstall
             disableStockLinksAfterInstall = config.disableStockLinksAfterInstall
             developerOptions = config.developerOptions
+            gitHubPat = config.gitHubPat
             // Resolve the smart-default if the user has never picked a channel
             // (returns DEV when the running build is dev, STABLE otherwise).
             updateChannelPreference = configRepository.getOrInitUpdateChannelPreference(
@@ -103,6 +108,11 @@ fun SettingsDialogHost() {
 
     if (showSettingsDialog) {
         SettingsDialog(
+            currentLanguage = languageState.current,
+            onLanguageChange = { code ->
+                languageState.onChange(code)
+                scope.launch { configRepository.setLanguage(code) }
+            },
             currentTheme = themeState.current,
             onThemeChange = { themeState.onChange(it) },
             autoCleanupTempFiles = autoCleanupTempFiles,
@@ -189,6 +199,11 @@ fun SettingsDialogHost() {
                 collapsibleSectionStates = collapsibleSectionStates + (id to expanded)
                 scope.launch { configRepository.setCollapsibleSectionExpanded(id, expanded) }
             },
+            gitHubPat = gitHubPat,
+            onGitHubPatChange = { pat ->
+                gitHubPat = pat
+                scope.launch { configRepository.setGitHubPat(pat) }
+            },
             customAccentColorArgb = customAccentColorArgb,
             onCustomAccentColorChange = {
                 customAccentColorArgb = it
@@ -221,12 +236,13 @@ fun SettingsButton(
             .clip(RoundedCornerShape(corners.small))
             .background(containerColor)
             .border(1.dp, borderColor, RoundedCornerShape(corners.small))
+            .handCursor()
             .clickable { settingsDialogVisible.value = true },
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = MorpheIcons.Settings,
-            contentDescription = "Settings",
+            contentDescription = stringResource(Res.string.settings_dialog_title),
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(16.dp)
         )

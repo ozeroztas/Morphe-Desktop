@@ -53,16 +53,18 @@ import app.morphe.gui.ui.theme.LocalMorpheCorners
 import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.channelColor
 import app.morphe.gui.util.EnabledSourcesLoader
+import app.morphe.morphe_desktop.generated.resources.*
 import java.awt.Cursor
 import java.io.File
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 
 /**
  * Multi-source management sheet, summoned from the home header `+` button.
  * Lists every configured patch source with an enable toggle. Default source
- * cannot be deleted or renamed (mirrors morphe-manager rules); other sources
+ * cannot be deleted or renamed (mirrors morphe-manager rules). Other sources
  * can be edited or removed.
  *
  * Caller wires actions to [PatchSourceManager] / [ConfigRepository] equivalents.
@@ -109,9 +111,7 @@ fun SourceManagementSheet(
     sourceErrors: Map<String, String> = emptyMap(),
     /** Selection semantics. Defaults to multi-toggle (Expert mode). */
     mode: SourceSheetMode = SourceSheetMode.MULTI_TOGGLE,
-    /** sourceId of the currently picked source — only used when [mode] is SINGLE_SELECT. */
     activeSourceId: String? = null,
-    /** Called when the user picks a source — only used when [mode] is SINGLE_SELECT. */
     onSelectSingle: (sourceId: String) -> Unit = {},
 ) {
     val corners = LocalMorpheCorners.current
@@ -123,7 +123,7 @@ fun SourceManagementSheet(
     var editingSource by remember { mutableStateOf<PatchSource?>(null) }
 
     // ── Drag-to-reorder state ──────────────────────────────────────────────
-    // workingOrder is the live ordering the UI renders from; it reseeds only
+    // workingOrder is the live ordering the UI renders from. It reseeds only
     // when the actual id sequence from config changes (List equals is
     // structural), so a drag we just persisted doesn't get clobbered mid-flight.
     val density = LocalDensity.current
@@ -131,16 +131,16 @@ fun SourceManagementSheet(
     val sourcesById = remember(sources) { sources.associateBy { it.id } }
     // Stable identity (no remember key) so the drag gesture's captured reference
     // never goes stale. We instead adopt external order/membership changes via the
-    // effect below — but only while idle, so an in-flight drag is never clobbered.
+    // effect below, but only while idle, so an in-flight drag is never clobbered.
     var workingOrder by remember { mutableStateOf(sources.map { it.id }) }
     val rowHeights = remember { mutableStateMapOf<String, Int>() }
     var draggingId by remember { mutableStateOf<String?>(null) }
-    // Raw total cursor displacement since grab — never mutated mid-drag, so no
+    // Raw total cursor displacement since grab, never mutated mid-drag, so no
     // drift accumulates. Visual offset is derived by subtracting the layout
     // shift already applied via reordering (see dragOffsetY below).
     var dragDeltaY by remember { mutableStateOf(0f) }
     var dragStartIndex by remember { mutableStateOf(0) }
-    // Pull in source add/remove/rename/external-reorder — but never mid-drag, and
+    // Pull in source add/remove/rename/external-reorder, but never mid-drag, and
     // only when the id sequence actually changed (keyed on the id list), so the
     // order we just persisted from a drag doesn't trigger a snap-back.
     LaunchedEffect(sources.map { it.id }) {
@@ -158,10 +158,8 @@ fun SourceManagementSheet(
         onReorder(next)
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(corners.medium),
-        containerColor = MaterialTheme.colorScheme.surface,
+    MorpheAlertDialog(
+        onDismiss = onDismiss,
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -169,16 +167,15 @@ fun SourceManagementSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Patch sources",
+                    stringResource(Res.string.source_sheet_title),
                     fontFamily = font,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
                 )
-                // Reload sources — re-resolves a folder source to its newest .mpp.
-                IconButton(onClick = onRefresh, enabled = enabled, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onRefresh, enabled = enabled, modifier = Modifier.size(28.dp).handCursor(enabled)) {
                     Icon(
                         imageVector = MorpheIcons.Refresh,
-                        contentDescription = "Reload patches",
+                        contentDescription = stringResource(Res.string.source_sheet_reload_description),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 0.7f else 0.3f),
                         modifier = Modifier.size(16.dp),
                     )
@@ -188,7 +185,7 @@ fun SourceManagementSheet(
         text = {
             // Hoisted so the scrollbar can share the same state as the
             // scrolling Column. The scrollbar renders only when the
-            // content actually overflows (maxValue > 0) — keeps the
+            // content actually overflows (maxValue > 0), which keeps the
             // dialog clean for the common case of a handful of sources.
             val scrollState = rememberScrollState()
             Box {
@@ -204,10 +201,10 @@ fun SourceManagementSheet(
                 ) {
                 Text(
                     text = when {
-                        !enabled -> "Disabled while patching"
+                        !enabled -> stringResource(Res.string.disabled_while_patching)
                         mode == SourceSheetMode.SINGLE_SELECT ->
-                            "Pick which source Quick Patch uses. Multi-source is available in Expert mode"
-                        else -> "Enable/Disable any combination. Patches from all enabled sources are unioned"
+                            stringResource(Res.string.source_sheet_quick_mode_hint)
+                        else -> stringResource(Res.string.source_sheet_multi_mode_hint)
                     },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal,
@@ -219,12 +216,12 @@ fun SourceManagementSheet(
 
                 orderedSources.forEachIndexed { index, source ->
                   // Key by source id (not list position) so a mid-drag reorder
-                  // moves the same composable instead of rebinding slots — which
+                  // moves the same composable instead of rebinding slots, which
                   // would otherwise cancel the in-flight drag gesture.
                   key(source.id) {
                     val isDragging = source.id == draggingId
                     // One slot's pitch (row height + inter-row spacing). Rows vary
-                    // slightly; the dragged row's own height is a fine unit and,
+                    // slightly. The dragged row's own height is a fine unit and,
                     // crucially, the same value drives both the target-index pick
                     // and the visual offset, so they stay in lockstep.
                     val slotPitch = ((rowHeights[source.id] ?: 0) + rowSpacingPx).coerceAtLeast(1f)
@@ -289,27 +286,15 @@ fun SourceManagementSheet(
 
                 Spacer(Modifier.height(2.dp))
 
-                OutlinedButton(
-                    onClick = { showAddDialog = true },
-                    enabled = enabled,
+                MorpheChoiceChip(
+                    text = stringResource(Res.string.add_source),
+                    active = false,
+                    font = font,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(corners.small),
-                    border = BorderStroke(1.dp, borderColor),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = MorpheIcons.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Add source",
-                        fontFamily = font,
-                        fontWeight = FontWeight.Normal,
-                        fontSize = 11.sp
-                    )
-                }
+                    icon = MorpheIcons.Add,
+                    enabled = enabled,
+                    onClick = { showAddDialog = true },
+                )
 
                 // Patch-developer extras. Sits under the sources it applies to, and
                 // renders only when Developer options are on.
@@ -332,9 +317,10 @@ fun SourceManagementSheet(
             TextButton(
                 onClick = onDismiss,
                 shape = RoundedCornerShape(corners.small),
+                modifier = Modifier.handCursor(),
             ) {
                 Text(
-                    "Done",
+                    stringResource(Res.string.source_sheet_done_button),
                     fontFamily = font,
                     fontWeight = FontWeight.Normal,
                     fontSize = 11.sp
@@ -406,7 +392,7 @@ private fun SourceRow(
     // patches for the source (PatchesScreen). In SINGLE_SELECT mode it picks the
     // source as the active one for Quick Patch. Disabled only while patching.
     val canInteract = enabled
-    // For visual highlight: in MULTI mode highlight when source is enabled; in
+    // For visual highlight: in MULTI mode highlight when source is enabled, in
     // SINGLE_SELECT highlight when this row is the picked one.
     val isHighlighted = if (mode == SourceSheetMode.SINGLE_SELECT) isActiveSelection else isEnabled
 
@@ -456,7 +442,7 @@ private fun SourceRow(
             .hoverable(hoverInteraction)
             .then(
                 if (canInteract) Modifier
-                    .pointerHoverIcon(PointerIcon.Hand)
+                    .handCursor()
                     .clickable(onClick = if (mode == SourceSheetMode.SINGLE_SELECT) onSelectSingle else onOpenPatches)
                 else Modifier
             )
@@ -464,7 +450,7 @@ private fun SourceRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (canReorder) {
-                // Drag handle — the only grab point; the rest of the row stays
+                // Drag handle, the only grab point. The rest of the row stays
                 // click-to-open. Position number sits beside it for orientation.
                 Box(
                     modifier = Modifier
@@ -475,7 +461,7 @@ private fun SourceRow(
                 ) {
                     Icon(
                         imageVector = MorpheIcons.DragIndicator,
-                        contentDescription = "Drag to reorder",
+                        contentDescription = stringResource(Res.string.drag_to_reorder),
                         tint = if (isDragging) accentColor
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         modifier = Modifier.size(15.dp)
@@ -512,9 +498,9 @@ private fun SourceRow(
                     ) {
                         Text(
                             text = when (source.type) {
-                                PatchSourceType.DEFAULT -> "Pre-installed"
-                                PatchSourceType.GITHUB, PatchSourceType.GITLAB -> "Remote"
-                                PatchSourceType.LOCAL -> "Local"
+                                PatchSourceType.DEFAULT -> stringResource(Res.string.source_sheet_type_preinstalled)
+                                PatchSourceType.GITHUB, PatchSourceType.GITLAB -> stringResource(Res.string.source_sheet_remote_label)
+                                PatchSourceType.LOCAL -> stringResource(Res.string.source_sheet_local_label)
                             },
                             fontSize = 10.sp,
                             fontFamily = font,
@@ -524,12 +510,16 @@ private fun SourceRow(
                         )
                     }
                 }
+                val builtinLabel = stringResource(Res.string.source_sheet_builtin)
+                val githubLabel = stringResource(Res.string.github_label)
+                val gitlabLabel = stringResource(Res.string.source_sheet_gitlab_label)
+                val localFileLabel = stringResource(Res.string.patch_source_dialog_local_file_label)
                 Text(
                     text = when (source.type) {
-                        PatchSourceType.DEFAULT -> source.url?.removePrefix("https://github.com/") ?: "Built-in"
-                        PatchSourceType.GITHUB -> source.url?.removePrefix("https://github.com/") ?: "GitHub"
-                        PatchSourceType.GITLAB -> source.url?.removePrefix("https://gitlab.com/") ?: "GitLab"
-                        PatchSourceType.LOCAL -> source.filePath?.let { File(it).name } ?: "Local file"
+                        PatchSourceType.DEFAULT -> source.url?.removePrefix("https://github.com/") ?: builtinLabel
+                        PatchSourceType.GITHUB -> source.url?.removePrefix("https://github.com/") ?: githubLabel
+                        PatchSourceType.GITLAB -> source.url?.removePrefix("https://gitlab.com/") ?: gitlabLabel
+                        PatchSourceType.LOCAL -> source.filePath?.let { File(it).name } ?: localFileLabel
                     },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal,
@@ -560,7 +550,7 @@ private fun SourceRow(
             ) {
                 if (error != null) {
                     Text(
-                        text = "Failed",
+                        text = stringResource(Res.string.failed),
                         fontSize = 11.sp,
                         fontFamily = font,
                         fontWeight = FontWeight.Medium,
@@ -574,7 +564,7 @@ private fun SourceRow(
                         fontWeight = FontWeight.Medium,
                         color = accentColor
                     )
-                    ChannelBadge(channel = channel, font = font)
+                    ChannelBadge(channel = channel)
                 } else if (isEnabled && isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
@@ -582,7 +572,7 @@ private fun SourceRow(
                         color = accentColor,
                     )
                     Text(
-                        text = "Resolving...",
+                        text = stringResource(Res.string.source_sheet_status_resolving),
                         fontSize = 11.sp,
                         fontFamily = font,
                         fontWeight = FontWeight.Medium,
@@ -591,7 +581,6 @@ private fun SourceRow(
                 }
             }
 
-            // Precise fallback to dragging — nudge one slot at a time.
             if (canReorder) {
                 ReorderArrows(
                     canMoveUp = canMoveUp,
@@ -607,7 +596,7 @@ private fun SourceRow(
                 IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
                     Icon(
                         imageVector = MorpheIcons.Edit,
-                        contentDescription = "Edit",
+                        contentDescription = stringResource(Res.string.source_sheet_edit_description),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                         modifier = Modifier.size(14.dp)
                     )
@@ -616,7 +605,7 @@ private fun SourceRow(
                     IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
                         Icon(
                             imageVector = MorpheIcons.Close,
-                            contentDescription = "Remove",
+                            contentDescription = stringResource(Res.string.remove),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                             modifier = Modifier.size(14.dp)
                         )
@@ -656,9 +645,8 @@ private fun SourceRow(
     }
 }
 
-
 /**
- * Compact vertical up/down nudge control — a keyboard-free, precise fallback to
+ * Compact vertical up/down nudge control, a keyboard-free precise fallback to
  * drag reordering. Arrows dim out at the list ends.
  */
 @Composable
@@ -670,8 +658,8 @@ private fun ReorderArrows(
     accentColor: Color,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        ReorderArrow(MorpheIcons.KeyboardArrowUp, "Move up", canMoveUp, accentColor, onMoveUp)
-        ReorderArrow(MorpheIcons.KeyboardArrowDown, "Move down", canMoveDown, accentColor, onMoveDown)
+        ReorderArrow(MorpheIcons.KeyboardArrowUp, stringResource(Res.string.source_sheet_move_up_description), canMoveUp, accentColor, onMoveUp)
+        ReorderArrow(MorpheIcons.KeyboardArrowDown, stringResource(Res.string.source_sheet_move_down_description), canMoveDown, accentColor, onMoveDown)
     }
 }
 
@@ -691,7 +679,7 @@ private fun ReorderArrow(
             .then(
                 if (active) Modifier
                     .hoverable(interaction)
-                    .pointerHoverIcon(PointerIcon.Hand)
+                    .handCursor()
                     .clickable(onClick = onClick)
                 else Modifier
             ),
@@ -713,66 +701,21 @@ private fun ReorderArrow(
 @Composable
 private fun ChannelBadge(
     channel: EnabledSourcesLoader.Channel?,
-    font: FontFamily,
 ) {
-    val corners = LocalMorpheCorners.current
     val label = when (channel) {
-        EnabledSourcesLoader.Channel.STABLE_LATEST -> "Latest Stable"
-        EnabledSourcesLoader.Channel.STABLE_OLDER -> "Older Stable"
-        EnabledSourcesLoader.Channel.DEV_LATEST -> "Latest Dev"
-        EnabledSourcesLoader.Channel.DEV_OLDER -> "Older Dev"
-        EnabledSourcesLoader.Channel.LOCAL -> "Local"
-        else -> "Latest Stable"
+        EnabledSourcesLoader.Channel.STABLE_LATEST -> stringResource(Res.string.version_label_latest_stable)
+        EnabledSourcesLoader.Channel.STABLE_OLDER -> stringResource(Res.string.source_sheet_channel_older_stable)
+        EnabledSourcesLoader.Channel.DEV_LATEST -> stringResource(Res.string.version_label_latest_dev)
+        EnabledSourcesLoader.Channel.DEV_OLDER -> stringResource(Res.string.source_sheet_channel_older_dev)
+        EnabledSourcesLoader.Channel.LOCAL -> stringResource(Res.string.source_sheet_local_label)
+        else -> stringResource(Res.string.version_label_latest_stable)
     }
     val color = channelColor(channel)
-    Box(
-        modifier = Modifier
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(corners.small))
-            .background(color.copy(alpha = 0.08f), RoundedCornerShape(corners.small))
-            .padding(horizontal = 5.dp, vertical = 1.dp)
-    ) {
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontFamily = font,
-            fontWeight = FontWeight.Medium,
-            color = color,
-        )
-    }
-}
-
-/**
- * Tiny status LED on the left of each source row. Solid glow when the source is
- * enabled; dim ring when off. Brightens on hover for the click-to-open affordance.
- */
-@Composable
-private fun LedIndicator(isOn: Boolean, isHot: Boolean, accentColor: Color) {
-    val color by animateColorAsState(
-        targetValue = when {
-            isOn && isHot -> accentColor
-            isOn -> accentColor.copy(alpha = 0.85f)
-            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
-        },
-        animationSpec = tween(200)
+    MorpheBadge(
+        text = label,
+        containerColor = color.copy(alpha = 0.12f),
+        contentColor = color,
     )
-    val haloAlpha by animateColorAsState(
-        targetValue = if (isOn) accentColor.copy(alpha = if (isHot) 0.35f else 0.18f) else Color.Transparent,
-        animationSpec = tween(200)
-    )
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(14.dp)) {
-        // Soft halo ring
-        Box(
-            modifier = Modifier
-                .size(12.dp)
-                .background(haloAlpha, shape = CircleShape)
-        )
-        // Core dot
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .background(color, shape = CircleShape)
-        )
-    }
 }
 
 /**
@@ -809,7 +752,7 @@ private fun DeveloperMppExclusionsSection(enabled: Boolean) {
                 .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
         )
         Text(
-            "Ignored .mpp patterns",
+            stringResource(Res.string.source_sheet_ignored_mpp_title),
             fontFamily = font,
             fontWeight = FontWeight.Medium,
             fontSize = 11.sp,
@@ -853,10 +796,7 @@ private fun ExcludedPatternsEditor(
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = "Only affects folder sources, which auto-load the newest .mpp in a folder. When " +
-                "picking that newest build, files whose name matches a pattern here are skipped. A " +
-                "plain word matches any file containing it (e.g. debug). Use * for globs (e.g. " +
-                "*-debug.mpp). *-sources.mpp and *-javadoc.mpp are always ignored",
+            text = stringResource(Res.string.source_sheet_ignored_mpp_hint),
             fontSize = 11.sp,
             fontWeight = FontWeight.Normal,
             fontFamily = font,
@@ -866,7 +806,7 @@ private fun ExcludedPatternsEditor(
         SlimTextField(
             value = draft,
             onValueChange = { draft = it },
-            placeholder = "e.g. debug or *-debug.mpp",
+            placeholder = stringResource(Res.string.source_sheet_ignored_mpp_placeholder),
             font = font,
             accents = accents,
             corners = corners,
@@ -880,7 +820,7 @@ private fun ExcludedPatternsEditor(
                 ) {
                     Icon(
                         imageVector = MorpheIcons.Add,
-                        contentDescription = "Add pattern",
+                        contentDescription = stringResource(Res.string.source_sheet_add_pattern_description),
                         modifier = Modifier.size(16.dp),
                         tint = if (draft.isNotBlank()) accents.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
@@ -909,7 +849,7 @@ private fun ExcludedPatternsEditor(
                 ) {
                     Icon(
                         imageVector = MorpheIcons.Close,
-                        contentDescription = "Remove pattern",
+                        contentDescription = stringResource(Res.string.source_sheet_remove_pattern_description),
                         modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )
@@ -917,18 +857,6 @@ private fun ExcludedPatternsEditor(
             }
         }
     }
-}
-
-@Composable
-private fun StatusCirclePlaceholder(
-    modifier: Modifier = Modifier,
-    size: Dp = 24.dp
-) {
-    Spacer(
-        modifier = modifier
-            .size(size)
-            .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-    )
 }
 
 @Composable

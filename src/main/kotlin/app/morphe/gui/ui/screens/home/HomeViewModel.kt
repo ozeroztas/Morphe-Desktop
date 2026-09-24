@@ -6,34 +6,44 @@
 package app.morphe.gui.ui.screens.home
 
 import app.morphe.engine.MorpheData
+import app.morphe.engine.MultiSourceLoader
 import app.morphe.engine.PatchEngine.Config.Companion.DEFAULT_KEYSTORE_ALIAS
 import app.morphe.engine.PatchedAppStore
 import app.morphe.engine.UpdateInfo
 import app.morphe.engine.model.PatchedAppRecord
+import app.morphe.engine.readableMessage
 import app.morphe.engine.util.ApkManifestReader
 import app.morphe.engine.util.SignatureIdentity
 import app.morphe.gui.data.constants.AppConstants
 import app.morphe.gui.data.model.Patch
+import app.morphe.gui.data.model.FollowMode
 import app.morphe.gui.data.model.SourceVersionPref
 import app.morphe.gui.data.model.SupportedApp
 import app.morphe.gui.data.repository.ActiveMode
+import app.morphe.gui.data.repository.ChangelogRepository
 import app.morphe.gui.data.repository.ConfigRepository
 import app.morphe.gui.data.repository.PatchRepository
 import app.morphe.gui.data.repository.PatchSourceManager
 import app.morphe.gui.data.repository.UpdateCheckRepository
 import app.morphe.gui.ui.screens.home.components.AppListFilter
+import app.morphe.gui.util.AdbException
 import app.morphe.gui.util.AdbManager
 import app.morphe.gui.util.ChecksumStatus
 import app.morphe.gui.util.DeviceMonitor
 import app.morphe.gui.util.EnabledSourcesLoader
 import app.morphe.gui.util.FileUtils
+import app.morphe.gui.util.FormatUtils
 import app.morphe.gui.util.Logger
 import app.morphe.gui.util.PatchService
+import app.morphe.gui.util.PatchException
 import app.morphe.gui.util.SupportedAppExtractor
+import app.morphe.gui.util.ChangelogParser
 import app.morphe.gui.util.VersionResolution
 import app.morphe.gui.util.VersionStatus
+import app.morphe.gui.util.isNewerVersion
 import app.morphe.gui.util.humanizePatchLoadError
 import app.morphe.gui.util.resolveVersionStatus
+import app.morphe.morphe_desktop.generated.resources.*
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import java.io.File
@@ -48,6 +58,9 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getPluralString
+import org.jetbrains.compose.resources.getString
 
 class HomeViewModel(
     private val patchSourceManager: PatchSourceManager,
@@ -55,6 +68,7 @@ class HomeViewModel(
     private val configRepository: ConfigRepository,
     private val updateCheckRepository: UpdateCheckRepository,
     private val patchedAppStore: PatchedAppStore,
+    private val changelogRepository: ChangelogRepository,
     private val adbManager: AdbManager = AdbManager(),
 ) : ScreenModel {
 
@@ -88,7 +102,6 @@ class HomeViewModel(
             ?: emptyList()
 
     init {
-        // Background CLI update check — non-blocking, banner only.
         screenModelScope.launch {
             val config = configRepository.loadConfig()
             val info = updateCheckRepository.getUpdateInfo()
@@ -102,11 +115,12 @@ class HomeViewModel(
                 appListFilter = runCatching {
                     AppListFilter.valueOf(config.homeAppListFilter)
                 }.getOrDefault(AppListFilter.ALL),
+                sortMode = HomeAppSortMode.fromPreference(config.homeAppSortMode),
             )
         }
 
         // React to history changes (a patch just completed, a record forgotten)
-        // so badges + device state update immediately — no leave-and-return needed.
+        // so badges + device state update immediately. No leave-and-return needed.
         screenModelScope.launch {
             patchedAppStore.changes.collect { refreshPatchedState() }
         }
@@ -123,7 +137,7 @@ class HomeViewModel(
 
         // Load patches whenever EXPERT becomes the active mode. StateFlow
         // emits its current value on subscribe, so this also covers the
-        // "VM was just created while EXPERT is active" case — replaces the
+        // "VM was just created while EXPERT is active" case. Replaces the
         // unconditional init-block load that used to fire even when the
         // user was actually in Quick mode (we don't construct HomeVM in
         // pure Quick sessions today, but Voyager keeps it alive across
@@ -136,10 +150,9 @@ class HomeViewModel(
             }
         }
 
-        // Observe source changes — drop(1) to skip the initial value
         screenModelScope.launch {
             patchSourceManager.sourceVersion.drop(1).collect {
-                // Skip when Quick mode is active — QuickPatchViewModel will
+                // Skip when Quick mode is active. QuickPatchViewModel will
                 // handle the reload for its (single) active source. Without
                 // this gate both VMs fire parallel loads on every cache
                 // clear, doubling network traffic and tripling the
@@ -216,67 +229,6 @@ class HomeViewModel(
     private var sourcesFailedBannerDismissed: Boolean = false
 
     /**
-     * Begin an "Update" for [record]: resolve the LATEST patch files (ignoring any
-     * pinned version — this run only, leaving global config untouched), then work
-     * out whether the user's patched APK version still satisfies what the latest
-     * patches target. Result lands in [HomeUiState.updatePrep] for the screen to act on.
-     */
-    fun prepareUpdate(record: PatchedAppRecord) {
-        _uiState.value = _uiState.value.copy(updatePrep = UpdatePrep.Preparing(record.packageName))
-        screenModelScope.launch {
-            try {
-                val enabled = patchSourceManager.getEnabledRepositories()
-                // emptyMap() preferred versions → each source resolves to its latest
-                // release (the pin override is scoped to this call; config is untouched).
-                val result = EnabledSourcesLoader.loadAll(enabled, patchService, emptyMap(), configRepository.loadConfig().excludedMppPatterns)
-                val resolvedOk = result.resolved.filter { it.patchFile != null }
-                val files = resolvedOk.mapNotNull { it.patchFile?.absolutePath }
-                if (files.isEmpty()) {
-                    _uiState.value = _uiState.value.copy(
-                        updatePrep = UpdatePrep.Failed(record.packageName, "Couldn't resolve the latest patches (offline?)."),
-                    )
-                    return@launch
-                }
-                val names = resolvedOk.map { it.source.name }
-                val apps = SupportedAppExtractor.extractSupportedApps(result.unionGuiPatches)
-                // Use the LATEST patch's supported versions to pick the channel-appropriate
-                // target — so a newer experimental app version a newer patch introduces is
-                // offered, even though the old version has rolled off the experimental list.
-                val app = apps.find { it.packageName == record.packageName }
-                val (target, _) = suggestedAppVersion(app, record.apkVersion)
-                val needsNewerApk = isNewerVersion(target, record.apkVersion)
-                val currentSupported = app?.recommendedVersion == null ||
-                    app.supportedVersions.any { it.equals(record.apkVersion, ignoreCase = true) } ||
-                    app.experimentalVersions.any { it.equals(record.apkVersion, ignoreCase = true) }
-                val downloadUrl = if (needsNewerApk && target != null && app != null) {
-                    app.let { SupportedApp.getDownloadUrl(it.packageName, target) }
-                } else null
-                _uiState.value = _uiState.value.copy(
-                    updatePrep = UpdatePrep.Ready(
-                        packageName = record.packageName,
-                        patchFilePaths = files,
-                        sourceNames = names,
-                        targetVersion = target,
-                        needsNewerApk = needsNewerApk,
-                        currentSupported = currentSupported,
-                        downloadUrl = downloadUrl,
-                    ),
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    updatePrep = UpdatePrep.Failed(record.packageName, e.message ?: "Update preparation failed"),
-                )
-            }
-        }
-    }
-
-    fun clearUpdatePrep() {
-        if (_uiState.value.updatePrep != null) _uiState.value = _uiState.value.copy(updatePrep = null)
-    }
-
-    /**
      * Install the already-patched output APK for [packageName] onto the selected
      * device (no re-patch needed). On completion, refresh the device layer so the
      * "install pending" badge clears the moment the device reports the new version.
@@ -306,9 +258,13 @@ class HomeViewModel(
                 }
             }
 
+            val installError = result.exceptionOrNull()?.let {
+                val detail = (it as? AdbException)?.getUserMessage() ?: it.message ?: ""
+                getString(Res.string.home_install_failed, detail)
+            } ?: _uiState.value.error
             _uiState.value = _uiState.value.copy(
                 installingPackage = null,
-                error = result.exceptionOrNull()?.let { "Install failed: ${it.message}" } ?: _uiState.value.error,
+                error = installError,
             )
             refreshDeviceInfo()
         }
@@ -317,11 +273,11 @@ class HomeViewModel(
     /**
      * Uninstall the patched app for [packageName] from the selected device. When
      * [alsoForget] is true, the recall record is removed afterward (uninstall +
-     * delete history); otherwise the record is kept (uninstall + keep history) so
+     * delete history). Otherwise the record is kept (uninstall + keep history) so
      * the card stays as a not-installed entry the user can re-install/re-patch.
      *
      * Removing through Morphe (vs the launcher) keeps our device-state tracking
-     * accurate — [refreshDeviceInfo] runs on completion so the card flips to
+     * accurate. [refreshDeviceInfo] runs on completion so the card flips to
      * not-installed immediately.
      */
     fun uninstallPatchedApp(packageName: String, alsoForget: Boolean) {
@@ -334,12 +290,22 @@ class HomeViewModel(
             if (result.isSuccess && alsoForget) {
                 patchedAppStore.delete(packageName)
             }
+            val uninstallError = result.exceptionOrNull()?.let {
+                val detail = (it as? AdbException)?.getUserMessage() ?: it.message ?: ""
+                getString(Res.string.home_uninstall_failed, detail)
+            } ?: _uiState.value.error
             _uiState.value = _uiState.value.copy(
                 uninstallingPackage = null,
-                error = result.exceptionOrNull()?.let { "Uninstall failed: ${it.message}" } ?: _uiState.value.error,
+                error = uninstallError,
             )
             refreshDeviceInfo()
         }
+    }
+
+    fun setSortMode(mode: HomeAppSortMode) {
+        if (_uiState.value.sortMode == mode) return
+        _uiState.value = _uiState.value.copy(sortMode = mode)
+        screenModelScope.launch { configRepository.setHomeAppSortMode(mode.name) }
     }
 
     /** Switch the home apps tab (ALL/YOURS) and remember it for next launch. */
@@ -364,7 +330,7 @@ class HomeViewModel(
 
     // Track the last loaded version to avoid reloading unnecessarily
     private var lastLoadedVersion: String? = null
-    // Snapshot of per-source pinned versions used in the last load — drives
+    // Snapshot of per-source pinned versions used in the last load. Drives
     // refreshPatchesIfNeeded so we reload when ANY source's pin changes.
     private var lastLoadedVersionsBySource: Map<String, SourceVersionPref> = emptyMap()
 
@@ -383,13 +349,13 @@ class HomeViewModel(
                 if (enabled.isEmpty()) {
                     _uiState.value = _uiState.value.copy(
                         isLoadingPatches = false,
-                        patchLoadError = "No patch sources enabled. Add or enable a source from the home screen."
+                        patchLoadError = getString(Res.string.home_no_sources_enabled)
                     )
                     return@launch
                 }
 
                 // Per-source pinned versions (with one-time migration from legacy
-                // single-source field). Each source's resolver looks up its own pin;
+                // single-source field). Each source's resolver looks up its own pin.
                 // no cross-source contamination.
                 val prefs = configRepository.getSourceVersionPrefs()
                 lastLoadedVersionsBySource = prefs
@@ -397,19 +363,23 @@ class HomeViewModel(
 
                 if (!result.anyLoaded) {
                     val firstThrowable = result.loaded.perSource.firstNotNullOfOrNull { it.error }
-                    val firstError = result.resolved.firstNotNullOfOrNull { it.error }
-                        ?: firstThrowable?.let { humanizePatchLoadError(it) }
-                        ?: "Could not load any patches"
-                    val friendlyError = if (firstError.contains("zip", ignoreCase = true) || firstError.contains("END header", ignoreCase = true)) {
-                        "Patch file is missing or corrupted. Clear cache and re-download."
-                    } else {
-                        firstError
-                    }
+                    val rawTechnicalError = firstThrowable?.message
+                        ?: result.resolved.firstNotNullOfOrNull { it.error }
+                        ?: "Failed to load any patches"
                     // Log the real throwable (full stack). Never only a null/blank .message.
                     if (firstThrowable != null) {
-                        Logger.error("Failed to load any patches: $friendlyError", firstThrowable)
+                        Logger.error("Failed to load any patches: $rawTechnicalError", firstThrowable)
                     } else {
-                        Logger.warn("Failed to load any patches: $firstError")
+                        Logger.warn("Failed to load any patches: $rawTechnicalError")
+                    }
+
+                    val firstError = result.resolved.firstNotNullOfOrNull { it.getUserErrorMessage() }
+                        ?: firstThrowable?.let { humanizePatchLoadError(it) }
+                        ?: getString(Res.string.error_could_not_load_patches)
+                    val friendlyError = if (firstError.contains("zip", ignoreCase = true) || firstError.contains("END header", ignoreCase = true)) {
+                        getString(Res.string.home_patch_file_corrupted)
+                    } else {
+                        firstError
                     }
                     result.loaded.perSource.filter { !it.isSuccess }.forEach { src ->
                         val err = src.error
@@ -432,7 +402,7 @@ class HomeViewModel(
 
                 cachedPatches = result.unionGuiPatches
                 // Preserve existing single-file API for downstream navigation. In
-                // multi-source mode this points at the first resolved source; the
+                // multi-source mode this points at the first resolved source. The
                 // full list is exposed via [getAllResolvedPatchFiles] and the
                 // per-source data via [getResolvedSourcesSnapshot].
                 val firstResolved = result.resolved.firstOrNull { it.patchFile != null }
@@ -451,14 +421,15 @@ class HomeViewModel(
                 // Only flag the whole UI as offline when EVERY successfully-resolved
                 // source had to fall back to its cache. One source being offline
                 // while others are online shouldn't make the whole screen scream
-                // "offline" — that's a per-source state, surfaced in the sheet.
+                // "offline". That's a per-source state, surfaced in the sheet.
                 val resolvedSources = result.resolved.filter { it.patchFile != null }
                 val isOffline = resolvedSources.isNotEmpty() && resolvedSources.all { it.isOffline }
                 val displayVersion = firstResolved?.resolvedVersion
                 val sourceName = if (result.resolved.size == 1) {
                     firstResolved?.source?.name ?: patchSourceManager.getActiveSourceName()
                 } else {
-                    "${result.resolved.count { it.patchFile != null }} sources"
+                    val count = result.resolved.count { it.patchFile != null }
+                    getPluralString(Res.plurals.count_sources, count, count)
                 }
 
                 val patchedStates = computePatchedStates(supportedApps)
@@ -481,7 +452,7 @@ class HomeViewModel(
                         result.loaded.perSource.forEach { s ->
                             if (!s.isSuccess) {
                                 val err = s.error
-                                add("${s.sourceName}: ${err?.let { humanizePatchLoadError(it) } ?: "failed to load"}")
+                                add("${s.sourceName}: ${err?.readableMessage() ?: "failed to load"}")
                                 if (err != null) {
                                     Logger.error("Patch source '${s.sourceName}' failed to load", err)
                                 }
@@ -516,7 +487,7 @@ class HomeViewModel(
             } catch (e: CancellationException) {
                 // Cancellation is normal coroutine bookkeeping (a newer load
                 // superseded this one, or the screen left composition). Do NOT
-                // write UI state — otherwise a stale "Job was cancelled" can
+                // write UI state. Otherwise a stale "Job was cancelled" can
                 // clobber the in-flight successor's loading/success state.
                 throw e
             } catch (e: Throwable) {
@@ -537,8 +508,8 @@ class HomeViewModel(
     /**
      * Cross-reference the patched-app history with the supported-apps list to
      * compute a per-package recall state for home-screen badges. v1 distinguishes
-     * "never patched / patched / patched-but-output-APK-missing"; "update
-     * available" detection is a later phase. Best-effort — failures yield no badges.
+     * "never patched / patched / patched-but-output-APK-missing". "update
+     * available" detection is a later phase. Best-effort. Failures yield no badges.
      */
     /** Last-loaded patched-app records, keyed by package. Powers one-click repatch. */
     private var patchedRecordsByPackage: Map<String, PatchedAppRecord> = emptyMap()
@@ -556,7 +527,7 @@ class HomeViewModel(
     fun recallUpdateInfo(record: PatchedAppRecord): RecallUpdateInfo =
         recallUpdateInfo(record, _uiState.value.supportedApps)
 
-    /** All records → their update info; precomputed for the list/cards (avoids
+    /** All records → their update info. Precomputed for the list/cards (avoids
      *  recomputing per recomposition). [apps] passed explicitly so it can be built
      *  from a freshly-loaded list before it lands in uiState. */
     private fun buildUpdateInfoMap(apps: List<SupportedApp>): Map<String, RecallUpdateInfo> =
@@ -569,8 +540,8 @@ class HomeViewModel(
     /**
      * When a newer patch than the loaded one exists, resolve+download the latest
      * patches in the background, parse their supported app versions, and rebuild
-     * [HomeUiState.updateInfoByPackage] against them — so the card/dialog can show
-     * "App vX → vY" up front. Best-effort; failures keep the loaded-patch info.
+     * [HomeUiState.updateInfoByPackage] against them. So the card/dialog can show
+     * "App vX → vY" up front. Best-effort. Failures keep the loaded-patch info.
      */
     private fun eagerlyResolveLatestApps() {
         val anyBehind = cachedSourcesResult?.resolved?.any {
@@ -599,6 +570,7 @@ class HomeViewModel(
     ): RecallUpdateInfo {
         val resolvedBySource = resolvedVersionBySource()   // what Re-patch will use right now
         val latestBySource = latestAvailableBySource()     // newest available (may need downloading)
+        val changedSources = relevantSourceUpdates[record.packageName].orEmpty()
         val sources = record.sourcesSnapshot
             // Only sources that actually contributed patches. The selection map has an
             // (empty) entry per enabled bundle, so an enabled-but-unused source has an
@@ -615,6 +587,7 @@ class HomeViewModel(
                     resolvedVersion = resolvedBySource[snap.sourceName],
                     latestAvailableVersion = latest,
                     outdated = isNewerVersion(latest, snap.version),
+                    hasRelevantChanges = snap.sourceName in changedSources,
                 )
             }
         val app = apps.find { it.packageName == record.packageName }
@@ -645,7 +618,7 @@ class HomeViewModel(
      * Returns (targetVersion, channel).
      *
      * Crucially this keys off the channel, not exact membership of the OLD version in
-     * the NEW patch's lists — so when a newer patch introduces a newer experimental
+     * the NEW patch's lists. So when a newer patch introduces a newer experimental
      * app version (e.g. patch 1.30 adds YouTube 21.21.80) it's still suggested even
      * though the user's 21.20.400 has rolled off the experimental list.
      */
@@ -667,8 +640,8 @@ class HomeViewModel(
 
     /**
      * Explicitly remove [packageName] from the patched-app history and refresh
-     * the badges. The only way a record leaves the store — we never auto-delete.
-     * Touches no files; re-patching the app recreates the record.
+     * the badges. The only way a record leaves the store. We never auto-delete.
+     * Touches no files. Re-patching the app recreates the record.
      */
     fun forgetPatchedApp(packageName: String) {
         // delete() emits a change → the store observer refreshes badges/device state.
@@ -677,7 +650,7 @@ class HomeViewModel(
 
     /**
      * Recompute badges + device state from the current store contents, reusing the
-     * already-loaded supported-apps list. Cheap (reads the in-memory store cache) —
+     * already-loaded supported-apps list. Cheap (reads the in-memory store cache)
      * this is the live-refresh path, distinct from a full patches reload.
      */
     private fun refreshPatchedState() {
@@ -721,15 +694,14 @@ class HomeViewModel(
         // source version (not just what's currently downloaded) so "update
         // available" surfaces without the user first selecting the newer file.
         val latestBySource = latestAvailableBySource()
-        apps.associate { app ->
+        val relevant = mutableMapOf<String, Set<String>>()
+        val states = apps.associate { app ->
             val record = records[app.packageName]
             val output = record?.let { File(it.outputApkPath) }
-            // "Update available" = a newer patch-source version (vs the snapshot) OR a
-            // newer recommended stable app version than what was patched. Either is
-            // worth re-patching, so both surface the same badge/notification.
-            val sourceUpdate = record?.hasAvailableUpdate(latestBySource) == true
-            val appUpdate = record != null &&
-                app.recommendedVersion?.let { isNewerVersion(it, record.apkVersion) } == true
+            val changedSources =
+                if (record == null) emptySet() else relevantUpdatedSources(record, app, latestBySource)
+            if (changedSources.isNotEmpty()) relevant[app.packageName] = changedSources
+            val sourceUpdate = changedSources.isNotEmpty()
             app.packageName to when {
                 record == null -> PatchedAppState.NEVER_PATCHED
                 output?.exists() != true -> PatchedAppState.APK_MISSING
@@ -737,13 +709,212 @@ class HomeViewModel(
                 // (The stored sha256 is kept for certain on-demand + device verify.)
                 record.outputApkSize > 0 && output.length() != record.outputApkSize ->
                     PatchedAppState.MODIFIED_EXTERNALLY
-                sourceUpdate || appUpdate -> PatchedAppState.PATCHED_WITH_UPDATES
+                sourceUpdate -> PatchedAppState.PATCHED_WITH_UPDATES
                 else -> PatchedAppState.PATCHED
             }
         }
+        relevantSourceUpdates = relevant
+        states
     } catch (e: Exception) {
         Logger.error("Failed to compute patched-app states", e)
         emptyMap()
+    }
+
+    suspend fun apkVersionOf(path: String): String? = withContext(Dispatchers.IO) {
+        runCatching { parseApkManifest(File(path))?.versionName }.getOrNull()
+    }
+
+    fun activePatchSources(): List<ActivePatchSource> =
+        cachedSourcesResult?.resolved
+            ?.filter { it.patchFile != null }
+            ?.map { ActivePatchSource(it.source.id, it.source.name, it.resolvedVersion) }
+            ?: emptyList()
+
+    suspend fun availableBundleVersions(sourceName: String): List<BundleRelease> {
+        val repo = patchSourceManager.getEnabledRepositories()
+            .firstOrNull { (source, _) -> source.name == sourceName }
+            ?.second
+            ?: return emptyList()
+        return repo.fetchReleases().getOrNull()
+            ?.map { BundleRelease(it.tagName, it.isDevRelease()) }
+            .orEmpty()
+    }
+
+    fun isBundleCached(sourceName: String, tag: String): Boolean {
+        val repo = patchSourceManager.getEnabledRepositories()
+            .firstOrNull { (source, _) -> source.name == sourceName }
+            ?.second
+            ?: return true
+        return repo.getCachedPatches(tag) != null
+    }
+
+    private val bundleSupportCache = mutableMapOf<String, List<SupportedApp>>()
+
+    suspend fun supportedAppFor(
+        packageName: String,
+        overrides: Map<String, BundleChoice>,
+    ): BundleSupport {
+        val resolvedByName = cachedSourcesResult?.resolved
+            ?.associateBy { it.source.name }
+            .orEmpty()
+
+        var isCurrent = true
+        val missing = mutableListOf<Pair<String, String>>()
+        val inputs = mutableListOf<MultiSourceLoader.SourceInput>()
+
+        for ((source, repo) in patchSourceManager.getEnabledRepositories()) {
+            val resolved = resolvedByName[source.name]
+            when (val choice = overrides[source.name]) {
+                is BundleChoice.Version -> {
+                    if (choice.tag != resolved?.resolvedVersion) isCurrent = false
+                    val cached = repo?.getCachedPatches(choice.tag)
+                    when {
+                        cached != null ->
+                            inputs += MultiSourceLoader.SourceInput(source.id, source.name, cached)
+                        repo == null -> resolved?.patchFile?.let {
+                            inputs += MultiSourceLoader.SourceInput(source.id, source.name, it)
+                        }
+                        else -> missing += source.name to choice.tag
+                    }
+                }
+                is BundleChoice.LocalFile -> {
+                    isCurrent = false
+                    File(choice.path).takeIf { it.exists() }?.let {
+                        inputs += MultiSourceLoader.SourceInput(source.id, source.name, it)
+                    }
+                }
+                null -> resolved?.patchFile?.let {
+                    inputs += MultiSourceLoader.SourceInput(source.id, source.name, it)
+                }
+            }
+        }
+
+        if (isCurrent) {
+            return BundleSupport(
+                app = _uiState.value.supportedApps.firstOrNull { it.packageName == packageName },
+                missing = emptyList(),
+                isCurrent = true,
+            )
+        }
+        if (missing.isNotEmpty()) return BundleSupport(null, missing, isCurrent = false)
+        if (inputs.isEmpty()) return BundleSupport(null, emptyList(), isCurrent = false)
+
+        val key = inputs.map { it.patchFile.absolutePath }.sorted().joinToString("|")
+        val apps = bundleSupportCache.getOrPut(key) {
+            SupportedAppExtractor.extractSupportedApps(
+                patchService.convertToGuiPatches(MultiSourceLoader.load(inputs).allPatches)
+            )
+        }
+        return BundleSupport(
+            app = apps.firstOrNull { it.packageName == packageName },
+            missing = emptyList(),
+            isCurrent = false,
+        )
+    }
+
+    suspend fun downloadBundle(
+        sourceName: String,
+        tag: String,
+        onProgress: (Float) -> Unit = {},
+    ): Result<Unit> {
+        val repo = patchSourceManager.getEnabledRepositories()
+            .firstOrNull { (source, _) -> source.name == sourceName }
+            ?.second
+            ?: return Result.failure(IllegalStateException("No repository configured for source '$sourceName'"))
+        val release = repo.fetchReleases().getOrNull()?.firstOrNull { it.tagName == tag }
+            ?: return Result.failure(IllegalStateException("Release '$tag' not found in source '$sourceName'"))
+        return repo.downloadPatches(release, onProgress).map { }
+    }
+
+    suspend fun resolvePatchFiles(
+        overrides: Map<String, BundleChoice>,
+        onDownloadProgress: ((String, Float) -> Unit)? = null,
+    ): Result<Pair<List<String>, List<String>>> = try {
+        val enabled = patchSourceManager.getEnabledRepositories()
+        val idByName = enabled.associate { (source, _) -> source.name to source.id }
+        val localFiles = overrides.mapNotNull { (name, choice) ->
+            (choice as? BundleChoice.LocalFile)?.let { name to File(it.path) }
+        }.toMap()
+
+        val prefs = overrides.mapNotNull { (name, choice) ->
+            val id = idByName[name] ?: return@mapNotNull null
+            (choice as? BundleChoice.Version)?.let {
+                id to SourceVersionPref(mode = FollowMode.PINNED, pinnedTag = it.tag)
+            }
+        }.toMap()
+
+        val result = EnabledSourcesLoader.loadAll(
+            enabled.filterNot { (source, _) -> source.name in localFiles },
+            patchService,
+            prefs,
+            configRepository.loadConfig().excludedMppPatterns,
+            onDownloadProgress,
+        )
+        val resolvedOk = result.resolved.filter { it.patchFile != null }
+
+        val files = mutableListOf<String>()
+        val names = mutableListOf<String>()
+        resolvedOk.forEach { r ->
+            files += r.patchFile!!.absolutePath
+            names += r.source.name
+        }
+        localFiles.forEach { (name, file) ->
+            if (!file.exists()) {
+                return Result.failure(PatchException("Patch file not found: ${file.name}", Res.string.error_patch_file_not_found, listOf(file.name)))
+            }
+            files += file.absolutePath
+            names += name
+        }
+
+        if (files.isEmpty()) {
+            Result.failure(PatchException("Could not resolve patch files", Res.string.home_could_not_resolve_patch_files))
+        } else {
+            Result.success(files to names)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Logger.error("Failed to resolve patch files with overrides", e)
+        Result.failure(e)
+    }
+
+    private var relevantSourceUpdates: Map<String, Set<String>> = emptyMap()
+
+    private suspend fun relevantUpdatedSources(
+        record: PatchedAppRecord,
+        app: SupportedApp,
+        latestBySource: Map<String, String?>,
+    ): Set<String> {
+        val resolvedByName = cachedSourcesResult?.resolved?.associateBy { it.source.name }.orEmpty()
+        val names = appNameCandidates(app)
+        return buildSet {
+            for ((_, sourceName, version) in record.sourcesSnapshot) {
+                val latest = latestBySource[sourceName] ?: continue
+                if (!isNewerVersion(latest, version)) continue
+
+                val resolved = resolvedByName[sourceName]
+                if (resolved == null) { add(sourceName); continue }
+                val prerelease = resolved.channel == EnabledSourcesLoader.Channel.DEV_LATEST ||
+                    resolved.channel == EnabledSourcesLoader.Channel.DEV_OLDER
+                val entries = changelogRepository.entriesFor(resolved.source, prerelease)
+                if (entries == null) { add(sourceName); continue }
+                if (names.isEmpty()) { add(sourceName); continue }
+
+                if (ChangelogParser.hasChangesFor(entries, version, names)) {
+                    add(sourceName)
+                } else {
+                    Logger.debug(
+                        "Changelog: '$sourceName' $version -> $latest lists no scoped " +
+                            "changes for ${app.displayName} (tried ${names.joinToString(", ")}), no badge"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun appNameCandidates(app: SupportedApp): Set<String> = buildSet {
+        app.displayName.takeIf { it.isNotBlank() }?.let { add(it) }
+        add(SupportedApp.getDisplayName(app.packageName))
     }
 
     /**
@@ -771,7 +942,6 @@ class HomeViewModel(
                 val devicePkg = record.installedPackageName
                 val outputExists = File(record.outputApkPath).exists()
                 record.packageName to if (devicePkg !in installed) {
-                    // Not on device — but the patched APK is on disk, so it can be installed.
                     DeviceAppInfo(installed = false, installedVersion = null, installPending = outputExists)
                 } else {
                     val (version, sigId) = adbManager.getInstalledPackageInfo(device.id, devicePkg) ?: (null to null)
@@ -786,7 +956,7 @@ class HomeViewModel(
     }
 
     /**
-     * Signature ids of Morphe's signing certs — the shared default keystore plus
+     * Signature ids of Morphe's signing certs. The shared default keystore plus
      * the user's configured keystore (if any). An installed app whose device
      * signature id is in this set was signed by Morphe.
      */
@@ -800,30 +970,6 @@ class HomeViewModel(
         config.resolvedKeystorePath()?.let { ks ->
             SignatureIdentity.idForKeystore(ks, config.keystorePassword, config.keystoreAlias)?.let { add(it) }
         }
-    }
-
-    /** True if any source the app was patched with now resolves to a newer version. */
-    private fun PatchedAppRecord.hasAvailableUpdate(currentVersionBySource: Map<String, String?>): Boolean =
-        sourcesSnapshot.any { snap -> isNewerVersion(currentVersionBySource[snap.sourceName], snap.version) }
-
-    /**
-     * Coarse "is [current] newer than [baseline]" — tolerant of `v` prefixes and
-     * `-dev`/prerelease suffixes (compares the numeric x.y.z core). Update
-     * detection accepts a few false positives, so exact prerelease ordering
-     * isn't needed; missing/"unknown" versions never flag an update.
-     */
-    private fun isNewerVersion(current: String?, baseline: String?): Boolean {
-        if (current.isNullOrBlank() || baseline.isNullOrBlank()) return false
-        if (current.equals("unknown", true) || baseline.equals("unknown", true)) return false
-        fun core(v: String) = v.trim().removePrefix("v").removePrefix("V")
-            .substringBefore('-')
-            .split('.').map { it.toIntOrNull() ?: 0 }
-        val c = core(current); val b = core(baseline)
-        for (i in 0 until maxOf(c.size, b.size)) {
-            val cv = c.getOrElse(i) { 0 }; val bv = b.getOrElse(i) { 0 }
-            if (cv != bv) return cv > bv
-        }
-        return false
     }
 
     /**
@@ -900,7 +1046,7 @@ class HomeViewModel(
                 _uiState.value = _uiState.value.copy(
                     selectedApk = null,
                     apkInfo = null,
-                    error = validationResult.errorMessage,
+                    error = validationResult.getUserErrorMessage() ?: validationResult.errorMessage,
                     isReady = false,
                     isAnalyzing = false
                 )
@@ -914,10 +1060,12 @@ class HomeViewModel(
         if (apkFile != null) {
             onFileSelected(apkFile)
         } else {
-            _uiState.value = _uiState.value.copy(
-                error = "Please drop a valid .apk, .apkm, .xapk, or .apks file",
-                isReady = false
-            )
+            screenModelScope.launch {
+                _uiState.value = _uiState.value.copy(
+                    error = getString(Res.string.error_drop_valid_apk),
+                    isReady = false
+                )
+            }
         }
     }
 
@@ -934,6 +1082,10 @@ class HomeViewModel(
         Logger.info("APK selection cleared")
     }
 
+    fun showError(message: String) {
+        _uiState.value = _uiState.value.copy(error = message)
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
     }
@@ -942,21 +1094,37 @@ class HomeViewModel(
         _uiState.value = _uiState.value.copy(isDragHovering = isHovering)
     }
 
-    private fun validateAndAnalyzeApk(file: File): ApkValidationResult {
+    private suspend fun validateAndAnalyzeApk(file: File): ApkValidationResult {
         if (!file.exists()) {
-            return ApkValidationResult(false, errorMessage = "File does not exist")
+            return ApkValidationResult(
+                isValid = false,
+                errorMessage = "File does not exist: ${file.absolutePath}",
+                errorRes = Res.string.home_validation_file_not_exist
+            )
         }
 
         if (!file.isFile) {
-            return ApkValidationResult(false, errorMessage = "Selected item is not a file")
+            return ApkValidationResult(
+                isValid = false,
+                errorMessage = "Selected item is not a file: ${file.absolutePath}",
+                errorRes = Res.string.home_validation_not_a_file
+            )
         }
 
         if (!FileUtils.isApkFile(file)) {
-            return ApkValidationResult(false, errorMessage = "File must have .apk, .apkm, .xapk, or .apks extension")
+            return ApkValidationResult(
+                isValid = false,
+                errorMessage = "Invalid APK file extension: ${file.name}",
+                errorRes = Res.string.home_validation_invalid_extension
+            )
         }
 
         if (file.length() < 1024) {
-            return ApkValidationResult(false, errorMessage = "File is too small to be a valid APK")
+            return ApkValidationResult(
+                isValid = false,
+                errorMessage = "APK file is too small (${file.length()} bytes): ${file.name}",
+                errorRes = Res.string.home_validation_file_too_small
+            )
         }
 
         // Parse APK info from AndroidManifest.xml using apk-parser
@@ -965,7 +1133,11 @@ class HomeViewModel(
         return if (apkInfo != null) {
             ApkValidationResult(true, apkInfo = apkInfo)
         } else {
-            ApkValidationResult(false, errorMessage = "Could not parse APK. The file may be corrupted or not a valid APK.")
+            ApkValidationResult(
+                isValid = false,
+                errorMessage = "Failed to parse APK manifest: ${file.name}",
+                errorRes = Res.string.home_validation_parse_failed
+            )
         }
     }
 
@@ -973,7 +1145,7 @@ class HomeViewModel(
      * Parse APK metadata directly from AndroidManifest.xml using apk-parser library.
      * This works with APKs from any source, not just APKMirror.
      */
-    private fun parseApkManifest(file: File): ApkInfo? {
+    private suspend fun parseApkManifest(file: File): ApkInfo? {
         // For split APK bundles (.apkm, .xapk, .apks), extract base.apk first
         val isBundleFormat = FileUtils.isBundleFormat(file)
         val apkToParse = if (isBundleFormat) {
@@ -986,7 +1158,7 @@ class HomeViewModel(
         }
 
         return try {
-            // ARSCLib reader (in engine) — same library morphe-patcher uses.
+            // ARSCLib reader (in engine). Same library morphe-patcher uses.
             // Handles split APKs cleanly because we only read direct string
             // attributes (no resource resolution that crashes apk-parser on
             // cross-split references).
@@ -994,16 +1166,14 @@ class HomeViewModel(
                 ?: throw IllegalStateException("ARSCLib couldn't read manifest")
 
             val packageName = manifest.packageName
-            val versionName = manifest.versionName ?: "Unknown"
+            val versionName = manifest.versionName ?: getString(Res.string.unknown)
+            val versionCode = manifest.versionCode
             val minSdk = manifest.minSdkVersion
 
-            // Check if package is supported — first check dynamic, then fall back to hardcoded.
-            val dynamicSupportedApp = _uiState.value.supportedApps.find { it.packageName == packageName }
+            val loadedApps = _uiState.value.supportedApps
+            val dynamicSupportedApp = loadedApps.find { it.packageName == packageName }
             val isSupported = dynamicSupportedApp != null ||
-                packageName in listOf(
-                    AppConstants.YouTube.PACKAGE_NAME,
-                    AppConstants.YouTubeMusic.PACKAGE_NAME
-                )
+                (loadedApps.isEmpty() && packageName in AppConstants.FALLBACK_PACKAGES)
 
             if (!isSupported) {
                 Logger.warn("Unsupported package: $packageName — no compatible patches found")
@@ -1016,7 +1186,7 @@ class HomeViewModel(
                 ?: SupportedApp.resolveDisplayName(packageName, manifest.applicationLabel)
 
             val versionResolution = if (dynamicSupportedApp != null) {
-                resolveVersionStatus(versionName, dynamicSupportedApp)
+                resolveVersionStatus(versionName, dynamicSupportedApp, versionCode)
             } else {
                 VersionResolution(VersionStatus.UNKNOWN, null)
             }
@@ -1030,16 +1200,20 @@ class HomeViewModel(
             // TODO: Re-enable when checksums are provided via .mpp files
             val checksumStatus = ChecksumStatus.NotConfigured
 
-            Logger.info("Parsed APK: $packageName v$versionName (recommended=$suggestedVersion, minSdk=$minSdk, archs=$architectures)")
+            Logger.info(
+                "Parsed APK: $packageName v${manifest.versionName ?: "unknown"}" +
+                    (versionCode?.let { " build $it" } ?: "") +
+                    " (recommended=$suggestedVersion, minSdk=$minSdk, archs=$architectures)"
+            )
 
             ApkInfo(
                 fileName = file.name,
                 filePath = file.absolutePath,
                 fileSize = file.length(),
-                formattedSize = formatFileSize(file.length()),
                 appName = appName,
                 packageName = packageName,
                 versionName = versionName,
+                versionCode = versionCode,
                 architectures = architectures,
                 minSdk = minSdk,
                 suggestedVersion = suggestedVersion,
@@ -1050,8 +1224,8 @@ class HomeViewModel(
         } catch (e: Exception) {
             // apk-parser commonly chokes on split-APK base.apks whose resource
             // references point into other splits (SoundCloud and similar). The
-            // base.apk is structurally valid — Android installs it fine, the
-            // patcher merges + patches it fine — but apk-parser can't resolve
+            // base.apk is structurally valid. Android installs it fine, the
+            // patcher merges + patches it fine. But apk-parser can't resolve
             // cross-split references from an isolated file.
             //
             // Fall back to a "limited info" parse: extract package/version from
@@ -1075,10 +1249,10 @@ class HomeViewModel(
      * the bundle's native libs, fuzzy-matches against the supported-apps list, and
      * sets [ApkInfo.hasLimitedInfo] = true so the UI can warn the user.
      *
-     * Patching still works regardless — the patcher merges splits first and reads
+     * Patching still works regardless. The patcher merges splits first and reads
      * the manifest from the merged APK via its own (working) reader.
      */
-    private fun parseApkManifestMinimal(file: File, isBundleFormat: Boolean): ApkInfo {
+    private suspend fun parseApkManifestMinimal(file: File, isBundleFormat: Boolean): ApkInfo {
         val (packageFromName, versionFromName) = parseFromApkMirrorFilename(file.name)
         val supportedApps = _uiState.value.supportedApps
 
@@ -1101,7 +1275,6 @@ class HomeViewModel(
             VersionResolution(VersionStatus.UNKNOWN, null)
         }
 
-        // Architectures scan is independent of manifest parsing — still reliable.
         val architectures = FileUtils.extractArchitectures(file)
 
         Logger.info(
@@ -1113,10 +1286,9 @@ class HomeViewModel(
             fileName = file.name,
             filePath = file.absolutePath,
             fileSize = file.length(),
-            formattedSize = formatFileSize(file.length()),
             appName = displayName,
             packageName = packageName,
-            versionName = versionFromName ?: "Unknown",
+            versionName = versionFromName ?: getString(Res.string.unknown),
             architectures = architectures,
             minSdk = null,
             suggestedVersion = versionResolution.suggestedVersion,
@@ -1192,19 +1364,32 @@ class HomeViewModel(
     //     architectures: List<String>, recommendedVersion: String?
     // ): app.morphe.gui.util.ChecksumStatus { ... }
 
-    private fun formatFileSize(bytes: Long): String {
-        return when {
-            bytes < 1024 -> "$bytes B"
-            bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
-            bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
-            else -> "%.2f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
-        }
-    }
-
-    // compareVersions and VersionStatus moved to app.morphe.gui.util.VersionUtils
 }
 
 /** Home-screen recall state per supported app (drives the row badge). */
+data class ActivePatchSource(
+    val id: String,
+    val name: String,
+    val resolvedVersion: String?,
+)
+
+data class BundleSupport(
+    val app: SupportedApp?,
+    val missing: List<Pair<String, String>>,
+    val isCurrent: Boolean,
+)
+
+data class BundleRelease(
+    val tag: String,
+    val isDev: Boolean,
+)
+
+sealed interface BundleChoice {
+    data class Version(val tag: String) : BundleChoice
+
+    data class LocalFile(val path: String) : BundleChoice
+}
+
 enum class PatchedAppState {
     NEVER_PATCHED,
     PATCHED,
@@ -1217,7 +1402,7 @@ enum class PatchedAppState {
 /**
  * Update guidance for a patched app's detail view: per-source patch-file freshness
  * plus app-version freshness within the channel the user patched on (stable vs
- * experimental). Drives the "newer version available — re-patch" hints.
+ * experimental). Drives the "newer version available. Re-patch" hints.
  */
 data class RecallUpdateInfo(
     val sources: List<SourceUpdate>,
@@ -1238,53 +1423,28 @@ data class RecallUpdateInfo(
         val name: String,
         /** Version this app was patched with (from the record snapshot). */
         val usedVersion: String,
-        /** Version currently resolved/downloaded — what a plain Re-patch will use. */
         val resolvedVersion: String?,
         /** Newest available version (an "Update" would move to this). */
         val latestAvailableVersion: String?,
         /** True when [latestAvailableVersion] is newer than [usedVersion]. */
         val outdated: Boolean,
+        val hasRelevantChanges: Boolean = false,
     )
 
+    val patchesChanged: Boolean get() = sources.any { it.hasRelevantChanges }
+
     enum class AppChannel { STABLE, EXPERIMENTAL, UNKNOWN }
-}
-
-/**
- * Async state for the "Update" action: resolve the LATEST patch files (ignoring
- * any pin, for this run only), then decide whether the user's APK still satisfies
- * what the latest patches target. The screen reacts to each state.
- */
-sealed interface UpdatePrep {
-    val packageName: String
-
-    data class Preparing(override val packageName: String) : UpdatePrep
-    data class Failed(override val packageName: String, val message: String) : UpdatePrep
-    data class Ready(
-        override val packageName: String,
-        /** Latest resolved patch-file paths to patch with. */
-        val patchFilePaths: List<String>,
-        val sourceNames: List<String>,
-        /** App version the latest patches recommend (channel-aware), if known. */
-        val targetVersion: String?,
-        /** True when [targetVersion] is newer than the version the user patched. */
-        val needsNewerApk: Boolean,
-        /** Whether the user's current APK version is still supported by the latest
-         *  patch (→ "your call" wording vs "no longer supported"). */
-        val currentSupported: Boolean,
-        /** Download link for [targetVersion] (supported-apps style), if applicable. */
-        val downloadUrl: String?,
-    ) : UpdatePrep
 }
 
 /** What the connected device reports about a patched app (optional device layer). */
 data class DeviceAppInfo(
     val installed: Boolean,
     val installedVersion: String?,
-    /** true = installed copy is Morphe-signed; false = re-signed/replaced externally;
+    /** true = installed copy is Morphe-signed. False = re-signed/replaced externally.
      *  null = couldn't determine (unrecognised dumpsys format / no keystore). */
     val signedByMorphe: Boolean? = null,
     /** The patched output APK is newer than what's on the device (or not installed at
-     *  all) and exists on disk — so it can be installed without re-patching. */
+     *  all) and exists on disk. So it can be installed without re-patching. */
     val installPending: Boolean = false,
 )
 
@@ -1302,20 +1462,15 @@ data class HomeUiState(
     val supportedApps: List<SupportedApp> = emptyList(),
     /** Per-package recall state for home-screen badges. */
     val patchedStates: Map<String, PatchedAppState> = emptyMap(),
-    /** Patched-app history, most-recent-first — drives the "Your apps" surface. */
     val patchedRecords: List<PatchedAppRecord> = emptyList(),
     /** Per-package update info (patch-file + app freshness) for the list/cards. */
     val updateInfoByPackage: Map<String, RecallUpdateInfo> = emptyMap(),
-    /** Which home apps tab is active (ALL/YOURS); restored from config on launch. */
-    val appListFilter: AppListFilter =
-        AppListFilter.ALL,
-    /** In-flight "Update" preparation (resolve latest → decide APK), or null. */
-    val updatePrep: UpdatePrep? = null,
+    val appListFilter: AppListFilter = AppListFilter.ALL,
+    val sortMode: HomeAppSortMode = HomeAppSortMode.RECOMMENDED,
     /** Package currently being installed to the device from its stored output APK. */
     val installingPackage: String? = null,
     /** Package currently being uninstalled from the device. */
     val uninstallingPackage: String? = null,
-    /** Per-package device install info (optional layer; empty when no device connected). */
     val deviceAppInfo: Map<String, DeviceAppInfo> = emptyMap(),
     val patchesVersion: String? = null,
     val patchesChannel: EnabledSourcesLoader.Channel? = null,
@@ -1323,7 +1478,6 @@ data class HomeUiState(
     val patchLoadError: String? = null,
     val updateInfo: UpdateInfo? = null,
     val dismissedUpdateVersion: String? = null,
-    /** Session-only dismiss; cleared on next app start. Not persisted. */
     val updateBannerSessionDismissed: Boolean = false,
     /** True when more than one source is enabled and the user hasn't dismissed
      *  the one-time multi-source intro hint yet. */
@@ -1346,31 +1500,16 @@ data class HomeUiState(
                 updateInfo.latestVersion != dismissedUpdateVersion &&
                 !updateBannerSessionDismissed
 
-    val isUsingLatestPatches: Boolean
-        get() = patchesChannel == EnabledSourcesLoader.Channel.STABLE_LATEST ||
-                patchesChannel == EnabledSourcesLoader.Channel.DEV_LATEST
-
-    /**
-     * Label for the LATEST badge — distinguishes stable vs dev so users can tell
-     * which channel they're on at a glance. Null when the loaded version isn't
-     * the newest of either channel.
-     */
-    val latestPatchesLabel: String?
-        get() = when (patchesChannel) {
-            EnabledSourcesLoader.Channel.STABLE_LATEST -> "Latest Stable"
-            EnabledSourcesLoader.Channel.DEV_LATEST -> "Latest Dev"
-            else -> null
-        }
 }
 
 data class ApkInfo(
     val fileName: String,
     val filePath: String,
     val fileSize: Long,
-    val formattedSize: String,
     val appName: String,
     val packageName: String,
     val versionName: String,
+    val versionCode: Int? = null,
     val architectures: List<String> = emptyList(),
     val minSdk: Int? = null,
     val suggestedVersion: String? = null,
@@ -1382,10 +1521,20 @@ data class ApkInfo(
      *  less accurate. UI should surface a banner letting the user know they can
      *  still proceed but card info is approximate. */
     val hasLimitedInfo: Boolean = false
-)
+) {
+    val formattedSize: String
+        get() = FormatUtils.formatFileSize(fileSize)
+}
 
 data class ApkValidationResult(
     val isValid: Boolean,
     val apkInfo: ApkInfo? = null,
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val errorRes: StringResource? = null,
+    val errorArgs: List<Any> = emptyList(),
+) {
+    suspend fun getUserErrorMessage(): String? {
+        val res = errorRes ?: return errorMessage
+        return getString(res, *errorArgs.toTypedArray())
+    }
+}

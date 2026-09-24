@@ -49,6 +49,13 @@ import app.morphe.gui.ui.theme.LocalMorpheDimens
 import app.morphe.gui.ui.theme.LocalMorpheFont
 import app.morphe.gui.ui.theme.MorpheAccentColors
 import app.morphe.gui.ui.theme.MorpheCornerStyle
+import app.morphe.gui.ui.components.MorpheDropdown
+import app.morphe.gui.ui.components.MorpheDropdownItem
+import app.morphe.gui.ui.screens.home.HomeAppSortMode
+import app.morphe.gui.ui.screens.home.comparator
+import app.morphe.gui.ui.screens.home.sortKeys
+import app.morphe.morphe_desktop.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
 
 // ============================================================================
 // SUPPORTED APPS LIST PANE
@@ -67,13 +74,6 @@ internal fun SupportedAppsListPane(
     patchedRecords: List<PatchedAppRecord> = emptyList(),
     deviceAppInfo: Map<String, DeviceAppInfo> = emptyMap(),
     updateInfoByPackage: Map<String, RecallUpdateInfo> = emptyMap(),
-    onRepatch: (String) -> Unit = {},
-    onForget: (String) -> Unit = {},
-    onUpdate: (String) -> Unit = {},
-    onInstall: (String) -> Unit = {},
-    installingPackage: String? = null,
-    onUninstall: (String) -> Unit = {},
-    uninstallingPackage: String? = null,
     onShowDetail: (PatchedAppRecord) -> Unit = {},
     filter: AppListFilter = AppListFilter.ALL,
     onFilterChange: (AppListFilter) -> Unit = {},
@@ -82,6 +82,8 @@ internal fun SupportedAppsListPane(
     loadError: String?,
     onRetry: () -> Unit,
     onManageSources: () -> Unit = {},
+    sortMode: HomeAppSortMode = HomeAppSortMode.RECOMMENDED,
+    onSortModeChange: (HomeAppSortMode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val corners = LocalMorpheCorners.current
@@ -91,16 +93,25 @@ internal fun SupportedAppsListPane(
     var searchQuery by remember { mutableStateOf("") }
     var expandedPackage by remember { mutableStateOf<String?>(null) }
 
-    val filtered = if (searchQuery.isBlank()) supportedApps
+    val matching = if (searchQuery.isBlank()) supportedApps
     else supportedApps.filter {
         it.displayName.contains(searchQuery, ignoreCase = true) ||
         it.packageName.contains(searchQuery, ignoreCase = true)
     }
-    val filteredRecords = if (searchQuery.isBlank()) patchedRecords
+    val installedPackages = deviceAppInfo.filterValues { it.installed }.keys
+    val patchedAtByPackage = patchedRecords.associate { it.packageName to it.patchedAt }
+    val order = sortMode.comparator()
+    val filtered = matching.sortedWith(
+        compareBy(order) { it.sortKeys(patchedStates, installedPackages, patchedAtByPackage) }
+    )
+    val matchingRecords = if (searchQuery.isBlank()) patchedRecords
     else patchedRecords.filter {
         it.displayName.contains(searchQuery, ignoreCase = true) ||
         it.packageName.contains(searchQuery, ignoreCase = true)
     }
+    val filteredRecords = matchingRecords.sortedWith(
+        compareBy(order) { it.sortKeys(patchedStates, installedPackages) }
+    )
     val activeCount = if (filter == AppListFilter.YOURS) patchedRecords.size else supportedApps.size
 
     // Collapse if the currently expanded app filters out.
@@ -110,13 +121,13 @@ internal fun SupportedAppsListPane(
         }
     }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
       val paneMaxHeight = maxHeight
       Column(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .align(Alignment.Center),
+            .align(Alignment.TopCenter),
       ) {
         // ── On-open update notice: jumps to "Your apps" where each is badged ──
         val updateCount = patchedStates.values.count { it == PatchedAppState.PATCHED_WITH_UPDATES }
@@ -125,12 +136,25 @@ internal fun SupportedAppsListPane(
         }
 
         // ── Filter: ALL APPS · YOUR APPS ──
-        AppListFilterChips(
-            filter = filter,
-            onSelect = onFilterChange,
-            allCount = supportedApps.size,
-            yourCount = patchedRecords.size,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(end = 12.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppListFilterChips(
+                filter = filter,
+                onSelect = onFilterChange,
+                allCount = supportedApps.size,
+                yourCount = patchedRecords.size,
+                modifier = Modifier.weight(1f),
+            )
+            MorpheDropdown(
+                label = sortMode.label,
+                items = HomeAppSortMode.entries.map { mode ->
+                    MorpheDropdownItem(mode.label) { onSortModeChange(mode) }
+                },
+                modifier = Modifier.width(170.dp),
+            )
+        }
 
         // ── Search field ──
         if (activeCount > 4) {
@@ -160,13 +184,6 @@ internal fun SupportedAppsListPane(
                 updateInfoByPackage = updateInfoByPackage,
                 appIconColorByPackage = supportedApps.associate { it.packageName to (it.appIconColor ?: "") }.filterValues { it.isNotEmpty() },
                 onShowDetail = onShowDetail,
-                onRepatch = onRepatch,
-                onUpdate = onUpdate,
-                onForget = onForget,
-                onInstall = onInstall,
-                installingPackage = installingPackage,
-                onUninstall = onUninstall,
-                uninstallingPackage = uninstallingPackage,
                 paneMaxHeight = paneMaxHeight,
                 showSearch = activeCount > 4,
             )
@@ -192,7 +209,7 @@ internal fun SupportedAppsListPane(
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
                 ) {
                     Text(
-                        text = "Load failed",
+                        text = stringResource(Res.string.home_list_load_failed),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = font,
@@ -213,7 +230,7 @@ internal fun SupportedAppsListPane(
                             shape = RoundedCornerShape(corners.small),
                         ) {
                             Text(
-                                "Retry",
+                                text = stringResource(Res.string.retry),
                                 fontFamily = font,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Normal
@@ -227,7 +244,7 @@ internal fun SupportedAppsListPane(
                             shape = RoundedCornerShape(corners.small),
                         ) {
                             Text(
-                                "Manage sources",
+                                text = stringResource(Res.string.home_header_manage_sources_button),
                                 fontFamily = font,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -242,8 +259,8 @@ internal fun SupportedAppsListPane(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (searchQuery.isBlank()) "No supported apps"
-                               else "No apps match \"$searchQuery\"",
+                        text = if (searchQuery.isBlank()) stringResource(Res.string.home_list_no_supported_apps)
+                               else stringResource(Res.string.home_list_no_apps_match, searchQuery),
                         fontSize = 13.sp,
                         fontFamily = font,
                         fontWeight = FontWeight.Normal,
@@ -348,6 +365,7 @@ internal fun SlimSearchField(
         textStyle = MaterialTheme.typography.bodySmall.copy(
             fontFamily = font,
             fontSize = 11.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.Normal,
             color = MaterialTheme.colorScheme.onSurface
         ),
@@ -373,11 +391,12 @@ internal fun SlimSearchField(
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Box(modifier = Modifier.weight(1f)) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
                         Text(
-                            "Filter apps…",
+                            text = stringResource(Res.string.filter_apps_hint),
                             fontSize = 11.sp,
+                            lineHeight = 14.sp,
                             fontWeight = FontWeight.Normal,
                             fontFamily = font,
                             color = muted.copy(alpha = 0.4f)
@@ -396,7 +415,7 @@ internal fun SlimSearchField(
                     ) {
                         Icon(
                             MorpheIcons.Clear,
-                            contentDescription = "Clear",
+                            contentDescription = stringResource(Res.string.clear),
                             tint = muted.copy(alpha = 0.5f),
                             modifier = Modifier.size(12.dp)
                         )

@@ -9,11 +9,13 @@ import app.morphe.desktop.command.model.toPatchBundle
 import app.morphe.engine.model.Release
 import app.morphe.engine.model.ReleaseAsset
 import app.morphe.gui.data.model.FollowMode
+import app.morphe.gui.util.newerRelease
 import app.morphe.gui.data.model.SourceVersionPref
 import app.morphe.gui.data.repository.ConfigRepository
 import app.morphe.gui.data.repository.PatchRepository
 import app.morphe.gui.data.repository.PatchSourceManager
 import app.morphe.gui.util.Logger
+import app.morphe.morphe_desktop.generated.resources.*
 import app.morphe.patcher.patch.loadPatchesFromJar
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import org.jetbrains.compose.resources.getString
 
 class PatchesViewModel(
     private val apkPath: String,
@@ -71,7 +74,7 @@ class PatchesViewModel(
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = "Local patch file not found: ${localFile.name}"
+                        error = getString(Res.string.patches_error_local_file_not_found, localFile.name)
                     )
                 }
                 return@launch
@@ -84,9 +87,6 @@ class PatchesViewModel(
                     val stableReleases = releases.filter { !it.isDevRelease() }
                     val devReleases = releases.filter { it.isDevRelease() }
 
-                    // Resolve this source's version preference to a concrete tag
-                    // to pre-select: a pin → its tag; follow-stable → newest stable;
-                    // follow-dev → newest overall.
                     val activeSource = patchSourceManager?.getActiveSource()
                     val activeSourceId = activeSource?.id
                     val pref = activeSourceId?.let { configRepository.getSourceVersionPrefs()[it] }
@@ -95,7 +95,7 @@ class PatchesViewModel(
                     val savedVersion = when (pref?.mode) {
                         FollowMode.PINNED -> pref.pinnedTag
                         else -> if (usePreRelease) {
-                            (devReleases.firstOrNull() ?: stableReleases.firstOrNull())?.tagName
+                            newerRelease(devReleases.firstOrNull(), stableReleases.firstOrNull())?.tagName
                         } else {
                             stableReleases.firstOrNull()?.tagName
                         }
@@ -109,7 +109,7 @@ class PatchesViewModel(
                             ?: stableReleases.firstOrNull()
                     } else {
                         if (usePreRelease) {
-                            devReleases.firstOrNull() ?: stableReleases.firstOrNull()
+                            newerRelease(devReleases.firstOrNull(), stableReleases.firstOrNull())
                         } else {
                             stableReleases.firstOrNull()
                         }
@@ -162,7 +162,10 @@ class PatchesViewModel(
                         val savedVersion = when (pref?.mode) {
                             FollowMode.PINNED -> pref.pinnedTag
                             else -> if (usePreRelease) {
-                                (offlineReleases.firstOrNull { it.isDevRelease() } ?: offlineReleases.firstOrNull { !it.isDevRelease() })?.tagName
+                                newerRelease(
+                                    offlineReleases.firstOrNull { it.isDevRelease() },
+                                    offlineReleases.firstOrNull { !it.isDevRelease() },
+                                )?.tagName
                             } else {
                                 offlineReleases.firstOrNull { !it.isDevRelease() }?.tagName
                             }
@@ -173,7 +176,10 @@ class PatchesViewModel(
                             offlineReleases.find { it.tagName == savedVersion }
                         } else null
                         val selected = initialRelease ?: if (usePreRelease) {
-                            offlineReleases.firstOrNull { it.isDevRelease() } ?: offlineReleases.firstOrNull { !it.isDevRelease() } ?: offlineReleases.firstOrNull()
+                            newerRelease(
+                                offlineReleases.firstOrNull { it.isDevRelease() },
+                                offlineReleases.firstOrNull { !it.isDevRelease() },
+                            ) ?: offlineReleases.firstOrNull()
                         } else {
                             offlineReleases.firstOrNull { !it.isDevRelease() } ?: offlineReleases.firstOrNull()
                         }
@@ -198,7 +204,7 @@ class PatchesViewModel(
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
                             isOffline = true,
-                            error = e.message ?: "Failed to load releases"
+                            error = e.message ?: getString(Res.string.patches_error_failed_to_load_releases)
                         )
                     }
                     Logger.error("Failed to load releases", e)
@@ -284,7 +290,7 @@ class PatchesViewModel(
         // Match the version-prefixed filename PatchRepository.downloadPatches writes.
         // Looking up by bare asset.name would falsely "find" the latest version's
         // file for every other version's check (since maintainers commonly reuse
-        // the asset filename across releases) — that was the cause of the
+        // the asset filename across releases). That was the cause of the
         // "latest stable shows SELECT after Clear Cache" bug.
         val cachedFile = File(patchesDir, PatchRepository.cachedFileName(release, asset))
 
@@ -360,7 +366,7 @@ class PatchesViewModel(
                 onFailure = { e ->
                     _uiState.value = _uiState.value.copy(
                         isDownloading = false,
-                        error = e.message ?: "Failed to download patches"
+                        error = e.message ?: getString(Res.string.patches_error_failed_to_download_patches)
                     )
                     Logger.error("Failed to download patches", e)
                 }
@@ -443,7 +449,7 @@ class PatchesViewModel(
                 Logger.info("Exported ${_uiState.value.downloadedPatchFile?.name} options to ${outputFile.path}")
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    error = "Failed to export options: ${e.message}"
+                    error = getString(Res.string.patches_error_failed_to_export_options, e.message ?: "")
                 )
                 Logger.error("Failed to export options JSON", e)
             } finally {
