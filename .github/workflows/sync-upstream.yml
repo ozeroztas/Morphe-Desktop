@@ -18,6 +18,8 @@ jobs:
           ref: main
 
       - name: Sync Morphe Desktop
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -81,7 +83,11 @@ jobs:
             git push origin main
           fi
 
-          # Keep upstream release tags available on the fork too. This runs even
-          # when main is already synchronized, because a new upstream tag may
-          # point to an existing commit without changing the branch.
-          git push origin --tags
+          # Tags that point to commits containing .github/workflows changes need
+          # a token with Contents: write and Workflows: write permissions.
+          if [ -z "${SYNC_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret SYNC_TOKEN. Create a fine-grained PAT with Contents: write and Workflows: write for this repository, then save it as Actions secret SYNC_TOKEN."
+            exit 1
+          fi
+
+          git push "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" --tags
