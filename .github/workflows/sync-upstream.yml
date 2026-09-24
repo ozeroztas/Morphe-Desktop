@@ -16,6 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+          persist-credentials: false
 
       - name: Sync Morphe Desktop
         env:
@@ -23,8 +24,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${SYNC_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret SYNC_TOKEN."
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Use the fine-grained PAT explicitly for all writes. Checkout's
+          # default GitHub App credential is disabled above so it cannot override
+          # SYNC_TOKEN during pushes.
+          git remote set-url origin "https://${GITHUB_ACTOR}:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           git remote add upstream https://github.com/MorpheApp/morphe-desktop.git
           git fetch upstream --tags
@@ -83,11 +94,6 @@ jobs:
             git push origin main
           fi
 
-          # Tags that point to commits containing .github/workflows changes need
-          # a token with Contents: write and Workflows: write permissions.
-          if [ -z "${SYNC_TOKEN:-}" ]; then
-            echo "::error::Missing repository secret SYNC_TOKEN. Create a fine-grained PAT with Contents: write and Workflows: write for this repository, then save it as Actions secret SYNC_TOKEN."
-            exit 1
-          fi
-
-          git push "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" --tags
+          # Mirror upstream tags to the fork. Tags whose commits modify
+          # .github/workflows require Workflows: write on SYNC_TOKEN.
+          git push origin --tags
