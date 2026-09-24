@@ -12,14 +12,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: main
 
       - name: Sync Morphe Desktop
         run: |
-          set -e
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -27,25 +27,59 @@ jobs:
           git remote add upstream https://github.com/MorpheApp/morphe-desktop.git
           git fetch upstream --tags
 
-          # Merge upstream without committing so fork-specific workflow files
-          # can be preserved in the merge result.
-          git merge upstream/main --no-edit --no-commit
-
-          # Keep this fork's workflow files exactly as they were before the merge.
-          git restore --source=HEAD --staged --worktree .github/workflows
-
-          # Remove workflow files that exist only on upstream.
-          git diff --name-only --diff-filter=A HEAD -- .github/workflows | while IFS= read -r file; do
-            git rm -f -- "$file"
-          done
-
-          # If upstream is already fully synchronized (or the merge produced no
-          # remaining changes after preserving workflows), there is nothing to commit.
-          if git diff --cached --quiet && git diff --quiet; then
+          # Avoid creating repeated no-op merge commits when the fork already
+          # contains the current upstream/main commit.
+          if git merge-base --is-ancestor upstream/main HEAD; then
             echo "Already up to date. Nothing to commit."
             exit 0
           fi
 
-          git commit -m "Merge upstream/main"
+          # Merge upstream. If conflicts are limited to workflow files, resolve
+          # them by keeping this fork's workflow directory. Any conflict outside
+          # .github/workflows is treated as a real sync conflict and still fails.
+          set +e
+          git merge upstream/main --no-edit --no-commit
+          merge_status=$?
+          set -e
 
+          if [ "$merge_status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+
+            if [ -z "$conflicts" ]; then
+              echo "Merge failed without resolvable file conflicts."
+              git merge --abort || true
+              exit "$merge_status"
+            fi
+
+            non_workflow_conflicts="$(
+              printf '%s\n' "$conflicts" |
+                grep -v '^\.github/workflows/' || true
+            )"
+
+            if [ -n "$non_workflow_conflicts" ]; then
+              echo "Upstream has conflicts outside .github/workflows:"
+              printf '%s\n' "$non_workflow_conflicts"
+              git merge --abort
+              exit 1
+            fi
+
+            echo "Resolving workflow-only conflicts by keeping fork workflows:"
+            printf '%s\n' "$conflicts"
+          fi
+
+          # Keep this fork's workflow files exactly as they were before the
+          # merge. This also removes workflow files that exist only upstream.
+          git restore --source=HEAD --staged --worktree .github/workflows
+
+          # Verify that no unresolved paths remain before committing.
+          unresolved="$(git diff --name-only --diff-filter=U)"
+          if [ -n "$unresolved" ]; then
+            echo "Unresolved merge conflicts remain:"
+            printf '%s\n' "$unresolved"
+            git merge --abort
+            exit 1
+          fi
+
+          git add -A
+          git commit -m "Merge upstream/main"
           git push origin main
