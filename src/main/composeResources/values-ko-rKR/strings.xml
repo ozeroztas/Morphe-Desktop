@@ -23,7 +23,7 @@
     <string name="error_could_not_reach_patch_server">패치 서버에 연결할 수 없습니다. 연결을 확인하세요</string>
     <string name="error_github_rate_limit">GitHub 속도 제한에 도달했습니다. 몇 분 후 다시 시도하세요</string>
     <string name="error_connection_dropped">다운로드 중 연결이 끊어졌습니다. 다시 시도하세요</string>
-    <string name="error_network_loading_patches">패치를 불러오는 중 네트워크 오류가 발생했습니다</string>
+    <string name="error_network_loading_patches">패치를 불러오는 중 네트워크 오류가 발생하였습니다</string>
     <string name="error_patch_file_not_found">패치 파일을 찾을 수 없음: %1$s</string>
     <string name="error_no_patches_files_supplied">제공된 패치 파일이 없습니다</string>
     <string name="error_input_apk_not_found">입력 APK를 찾을 수 없습니다</string>
@@ -42,14 +42,15 @@
     <string name="select_file">파일 선택</string>
     <string name="failed">실패</string>
     <string name="copy">복사</string>
-    <string name="copied">복사하였습니다</string>
+    <string name="copied">복사됨</string>
     <string name="click_to_copy">클릭하여 복사</string>
     <string name="enable_adb_button">ADB 활성화</string>
     <string name="drag_to_reorder">드래그하여 순서를 변경하세요</string>
     <string name="off">꺼짐</string>
     <string name="on">켜짐</string>
-    <string name="browse">찾아보기</string>
-    <string name="save">저장하기</string>
+    <string name="browse">탐색</string>
+    <string name="save">저장</string>
+    <string name="select_folder">폴더 선택</string>
     <string name="status_loading">불러오는 중…</string>
     <string name="download">다운로드</string>
     <string name="status_offline">오프라인</string>
@@ -65,23 +66,23 @@
     <string name="app_info_extensions_label">.apk  ·  .apkm  ·  .xapk  ·  .apks</string>
     <string name="app_info_shared_label">앱 정보</string>
     <string name="github_label">GitHub</string>
-    <string name="patches_search_hint">패치 검색하기…</string>
+    <string name="patches_search_hint">패치 검색…</string>
     <string name="status_patching_completed">패치 완료</string>
     <string name="status_patching_failed">패치 실패</string>
     <string name="status_patching_cancelled">패치 취소됨</string>
     <string name="view_full_logs_button">전체 로그 보기</string>
-    <string name="error_patching_unknown">알 수 없는 이유로 패치에 실패했습니다</string>
+    <string name="error_patching_unknown">알 수 없는 이유로 패치에 실패하였습니다</string>
     <string name="error_patching_general">오류: %1$s</string>
     <string name="error_log_label">오류 로그</string>
     <string name="back">뒤로</string>
     <string name="open_folder">폴더 열기</string>
     <string name="temporary_files_label">임시 파일</string>
-    <string name="size_can_be_freed_label">%1$s를 해제할 수 있습니다</string>
+    <string name="size_can_be_freed_label">%1$s를 확보할 수 있습니다</string>
     <string name="clean_up">정리</string>
     <string name="output_file_label">출력 파일</string>
     <string name="color_picker_saved">저장됨</string>
     <string name="dropdown_search_placeholder">검색…</string>
-    <string name="custom_color_description">사용자 정의 색상</string>
+    <string name="custom_color">사용자 정의 색상</string>
     <string name="gradient_linear">선형</string>
     <string name="gradient_radial">방사형</string>
     <string name="gradient_conic">원뿔형</string>
@@ -90,7 +91,7 @@
     <string name="gradient_angle">각도</string>
     <!-- App Card Fill Dialog -->
     <string name="card_fill_title">카드 사용자 정의</string>
-    <string name="card_fill_example_app_name">예시 앱 이름</string>
+    <string name="card_fill_example_app_name">앱 이름 예시</string>
     <string name="card_fill_mode_default">기본값</string>
     <string name="card_fill_mode_default_blurb">패치 번들에 포함된 색상</string>
     <string name="card_fill_mode_accent">강조</string>
@@ -105,7 +106,7 @@
     <string name="quick_patch_patch_another_button">다른 패치</string>
     <string name="quick_patch_select_apk">APK 선택</string>
     <string name="quick_patch_analyze_apk_failed">APK 분석 실패</string>
-    <string name="quick_patch_extract_base_apk_failed">번들에서 기본 APK를 추출하지 못했습니다</string>
+    <string name="quick_patch_extract_base_apk_failed">번들에서 기본 APK 추출 실패</string>
     <string name="quick_patch_unsupported_app_error">빠른 패치 모드에서는 %1$s 앱을 지원하지 않습니다. 지원되는 앱: %2$s. 지원되지 않는 앱은 일반 모드를 사용하세요</string>
     <string name="adb_install_on_button">%1$s에 설치</string>
     <!-- Patcher Steps -->
@@ -120,9 +121,9 @@
     <!-- ADB Installation Errors -->
     <string name="adb_status_installing">%1$s에 설치하는 중…</string>
     <string name="adb_error_downgrade">다운그레이드할 수 없습니다. 최신 버전이 설치되어 있습니다. 기존 앱을 먼저 제거하세요</string>
-    <string name="adb_error_already_exists">앱이 이미 있습니다. 먼저 앱을 제거해 보세요</string>
+    <string name="adb_error_already_exists">앱이 이미 존재합니다. 먼저 앱을 제거해 보세요</string>
     <string name="adb_error_storage">기기에 저장 공간이 충분하지 않습니다</string>
-    <string name="adb_error_invalid_apk">APK 파일이 잘못되었습니다</string>
+    <string name="adb_error_invalid_apk">잘못된 APK 파일입니다</string>
     <string name="adb_error_no_certificates">APK가 올바르게 서명되지 않았습니다</string>
     <string name="adb_error_update_incompatible">호환되지 않는 업데이트입니다. 서명이 일치하지 않습니다. 기존 앱을 먼저 제거하세요</string>
     <string name="adb_error_user_restricted">사용자 설정으로 인해 설치가 제한되었습니다</string>
@@ -134,18 +135,18 @@
     <string name="adb_error_device_not_found">%1$s 기기를 찾을 수 없습니다</string>
     <string name="adb_error_multiple_devices">여러 기기가 연결되었습니다. 하나를 선택하세요</string>
     <string name="adb_error_apk_not_found">APK 파일을 찾을 수 없음: %1$s</string>
-    <string name="adb_error_start_server">ADB 서버를 시작하지 못했습니다: %1$s</string>
-    <string name="adb_error_kill_server">ADB 서버를 종료하지 못했습니다: %1$s</string>
-    <string name="adb_error_get_devices">기기 목록을 가져오지 못했습니다: %1$s</string>
+    <string name="adb_error_start_server">ADB 서버를 시작하지 못하였습니다: %1$s</string>
+    <string name="adb_error_kill_server">ADB 서버를 종료하지 못하였습니다: %1$s</string>
+    <string name="adb_error_get_devices">기기 목록을 가져오지 못하였습니다: %1$s</string>
     <string name="adb_error_uninstall">제거 실패: %1$s</string>
-    <string name="adb_error_clear_logs">로그를 지우지 못했습니다: %1$s</string>
-    <string name="adb_error_capture_logs">로그를 캡처하지 못했습니다: %1$s</string>
+    <string name="adb_error_clear_logs">로그를 지우지 못하였습니다: %1$s</string>
+    <string name="adb_error_capture_logs">로그를 캡처하지 못하였습니다: %1$s</string>
     <string name="adb_error_run_command">명령 실행 실패: %1$s</string>
     <string name="adb_error_pm_list_packages">pm list packages 실패: %1$s</string>
     <string name="adb_status_routing_links">%1$s로 링크를 연결하는 중…</string>
-    <string name="adb_status_restoring_links">기본 링크 처리 복원 중…</string>
-    <string name="adb_status_disabling_links">%1$s에서 링크 사용 중지 중…</string>
-    <string name="adb_status_enabling_links">%1$s에서 링크 다시 사용 중…</string>
+    <string name="adb_status_restoring_links">기본 링크 처리를 복원하는 중…</string>
+    <string name="adb_status_disabling_links">%1$s에서 링크 사용을 중지하는 중…</string>
+    <string name="adb_status_enabling_links">%1$s에서 링크를 다시 사용하는 중…</string>
     <!-- Version Status (ApkInfoCard & Quick Patch) -->
     <string name="version_status_checksum_mismatch">체크섬 불일치</string>
     <string name="version_status_checksum_corrupted">파일이 손상되었을 수 있습니다. APKMirror에서 다시 다운로드하세요</string>
@@ -169,10 +170,10 @@
     <string name="version_warning_experiment_title">실험해 보시겠습니까? 🧪</string>
     <string name="version_warning_older_stable_title">이전 안정 버전</string>
     <string name="version_warning_older_stable_message">현재 버전: v%1$s\n최신 안정 버전: v%2$s\n\n이 버전은 지원되지만 최신 안정 버전을 사용할 수 있습니다. 최근 수정 사항이 누락되었을 수 있습니다.</string>
-    <string name="version_warning_latest_experimental_message">현재 버전: v%1$s\n\n이 버전은 초기 실험 지원 대상입니다\n\n🔧 이 앱 버전에 맞춰 패치가 개선되는 동안 예상치 못한 동작이나 미확인 버그가 발생할 수 있습니다.</string>
+    <string name="version_warning_latest_experimental_message">현재 버전: v%1$s\n\n이 버전은 초기 실험 지원 대상입니다\n\n🔧 이 앱 버전에 맞춰 패치가 개선되는 동안 예상되지 않은 동작이나 미확인 버그가 발생할 수 있습니다.</string>
     <string name="version_warning_older_experimental_title">이전 실험 버전\n실험해 보시겠어요? 🧪</string>
-    <string name="version_warning_older_experimental_message">현재 버전: v%1$s\n최신 실험 버전: v%2$s\n\n지원되는 실험 빌드이지만 최신 실험 버전을 사용할 수 있습니다. 이 앱 버전에 맞춰 패치가 개선되는 동안 예상치 못한 동작이나 미확인 버그가 발생할 수 있습니다.</string>
-    <string name="version_warning_too_new_message">현재 버전: v%1$s\n알려진 최신 버전: v%2$s\n\n이 버전은 초기 실험 지원 대상입니다\n\n🔧 이 앱 버전에 맞춰 패치가 개선되는 동안 예상치 못한 동작이나 미확인 버그가 발생할 수 있습니다.</string>
+    <string name="version_warning_older_experimental_message">현재 버전: v%1$s\n최신 실험 버전: v%2$s\n\n지원되는 실험 빌드이지만 최신 실험 버전을 사용할 수 있습니다. 이 앱 버전에 맞춰 패치가 개선되는 동안 예상되지 않은 동작이나 미확인 버그가 발생할 수 있습니다.</string>
+    <string name="version_warning_too_new_message">현재 버전: v%1$s\n알려진 최신 버전: v%2$s\n\n이 버전은 초기 실험 지원 대상입니다\n\n🔧 이 앱 버전에 맞춰 패치가 개선되는 동안 예상되지 않은 동작이나 미확인 버그가 발생할 수 있습니다.</string>
     <string name="version_warning_too_old_message">현재 버전: v%1$s\n지원되는 최소 버전: v%2$s\n\n공식 지원 버전이 아닙니다. 패치가 실패할 가능성이 높습니다.</string>
     <string name="version_warning_unsupported_message">현재 버전: v%1$s\n\n공식 지원 버전이 아닙니다. 패치가 실패할 가능성이 높습니다.</string>
     <string name="version_warning_notice_message">v%1$s로 계속할까요?</string>
@@ -181,26 +182,26 @@
     <string name="quick_patch_warning_latest_experimental">실험 빌드 - 지원되지만 제대로 작동하지 않을 수 있습니다</string>
     <string name="quick_patch_warning_older_experimental">이전 실험 빌드 - 최신 실험 버전 v%1$s 사용 가능</string>
     <string name="quick_patch_warning_build_unsupported">지원되지 않는 빌드 - 이 버전은 패치할 수 있지만 이 빌드는 패치할 수 없습니다</string>
-    <string name="quick_patch_warning_too_new">버전이 너무 최신 - 공식 지원되지 않으며 패치가 실패할 가능성이 높습니다</string>
+    <string name="quick_patch_warning_too_new">버전이 너무 최신입니다 - 공식 지원되지 않으며 패치가 실패할 가능성이 높습니다</string>
     <string name="quick_patch_warning_too_old">버전이 너무 오래됨 - 공식 지원되지 않으며 패치가 실패할 가능성이 높습니다</string>
     <string name="quick_patch_warning_unsupported_between">지원되지 않는 버전 - 패치가 실패할 가능성이 높습니다</string>
     <string name="quick_patch_read_apk_failed">APK를 읽지 못했습니다: %1$s</string>
-    <string name="quick_patch_status_preparing_patches">패치 준비 중…</string>
-    <string name="quick_patch_fetch_patches_failed">패치를 가져오지 못했습니다. 인터넷 연결을 확인하세요</string>
-    <string name="quick_patch_status_downloading_patches">패치 %1$s 다운로드 중…</string>
+    <string name="quick_patch_status_preparing_patches">패치를 준비하는 중…</string>
+    <string name="quick_patch_fetch_patches_failed">패치를 가져오지 못하였습니다. 인터넷 연결을 확인하세요</string>
+    <string name="quick_patch_status_downloading_patches">패치 %1$s를 다운로드하는 중…</string>
     <string name="quick_patch_download_patches_failed">패치를 다운로드할 수 없습니다: %1$s</string>
-    <string name="quick_patch_status_patching">패치 적용 중…</string>
-    <string name="quick_patch_completed_adb_off">ADB 꺼짐 · 설치하려면 사용</string>
+    <string name="quick_patch_status_patching">패치하는 중…</string>
+    <string name="quick_patch_completed_adb_off">ADB 꺼짐 · 설치하려면 활성화하세요</string>
     <string name="quick_patch_completed_adb_connect_device">ADB로 설치하려면 USB로 기기를 연결하세요</string>
     <string name="quick_patch_error_unknown_occurred">알 수 없는 오류가 발생하였습니다</string>
     <!-- Quick Patch - Patching Content -->
     <string name="quick_patch_idle_analyzing">APK 분석 중…</string>
-    <string name="quick_patch_patching_patches_count">패치 %1$d / %2$d  개</string>
+    <string name="quick_patch_patching_patches_count"> %1$d / %2$d  개의 패치</string>
     <string name="quick_patch_patching_slow_warning">평소보다 오래 걸리고 있습니다. 잠시 기다려 주세요…</string>
     <!-- Quick Patch - Ready Content -->
     <string name="quick_patch_ready_version_build">(build %1$d)</string>
     <string name="quick_patch_ready_no_compatible_patches">이 앱에 호환되는 패치가 없습니다</string>
-    <string name="quick_patch_ready_no_matching_patches">\"%1$s\"에 해당하는 패치가 없습니다</string>
+    <string name="quick_patch_ready_no_matching_patches">'%1$s'에 해당하는 패치가 없습니다</string>
     <string name="quick_patch_ready_patch_with_defaults">기본값으로 패치</string>
     <!-- Quick Patch - Supported Apps Row -->
     <string name="quick_patch_supported_apps_title">지원되는 앱</string>
@@ -208,7 +209,7 @@
     <string name="quick_patch_supported_apps_loading">지원되는 앱 불러오는 중…</string>
     <string name="quick_patch_supported_apps_load_error">지원되는 앱을 불러올 수 없습니다</string>
     <string name="quick_patch_supported_apps_change_source">소스 변경</string>
-    <string name="quick_patch_supported_apps_no_matches">일치하는 앱 없음</string>
+    <string name="quick_patch_supported_apps_no_matches">일치하는 앱이 없음</string>
     <string name="quick_patch_supported_apps_version_any">모든 버전</string>
     <!-- Home Screen -->
     <string name="home_select_apk_file">APK 파일 선택</string>
@@ -224,17 +225,17 @@
     <string name="home_validation_parse_failed">APK를 구문 분석할 수 없습니다. 파일이 손상되었거나 유효한 APK가 아닐 수 있습니다</string>
     <!-- Home Screen - ApkInfoCard -->
     <string name="home_apk_info_remove_description">APK 제거</string>
-    <string name="home_apk_info_limited_info_warning">이 APK의 매니페스트를 완전히 읽을 수 없습니다(분할 번들에서 흔함). 아래 세부 정보는 근사치이며, 패치는 여전히 작동합니다</string>
+    <string name="home_apk_info_limited_info_warning">이 APK의 매니페스트를 완전히 읽을 수 없습니다 (분할 번들에서 흔함). 아래 세부 정보는 근사치이며, 패치는 여전히 작동합니다</string>
     <string name="home_apk_info_unsupported_app_warning">이 앱에 호환되는 패치를 찾을 수 없습니다. 계속 진행할 수는 있지만 패치가 효과가 없을 수 있습니다</string>
     <string name="home_apk_info_version_label">버전</string>
     <string name="home_apk_info_build_label">빌드</string>
     <string name="home_apk_info_size_label">크기</string>
     <string name="home_apk_info_value_api">API %1$d</string>
-    <string name="home_apk_info_from_label">시작</string>
+    <string name="home_apk_info_from_label">출처</string>
     <string name="home_stage_change_apk">APK 변경</string>
     <string name="home_stage_continue">계속</string>
-    <string name="home_stage_analyzing_title">분석 중</string>
-    <string name="home_stage_reading_metadata">앱 메타데이터 읽는 중…</string>
+    <string name="home_stage_analyzing_title">분석하는 중</string>
+    <string name="home_stage_reading_metadata">앱 메타데이터를 읽는 중…</string>
     <!-- Home Screen - Dialogs -->
     <string name="home_dialog_forget_button">잊기</string>
     <string name="home_dialog_uninstall_button">설치 제거</string>
@@ -374,7 +375,6 @@
     <string name="patch_selection_configure_options_description">옵션 구성</string>
     <string name="patch_selection_icon_edit">아이콘 편집</string>
     <string name="patch_selection_icon_design">아이콘 디자인</string>
-    <string name="patch_selection_icon_import_folder">폴더 가져오기</string>
     <string name="patch_selection_icon_select_folder_title">아이콘 폴더 선택</string>
     <string name="patch_selection_icon_ready">사용자 지정 아이콘 준비 완료</string>
     <string name="patch_selection_icon_none">설정된 사용자 지정 아이콘 없음</string>
@@ -415,6 +415,13 @@
     <string name="patch_selection_option_hint_whole_number">정수</string>
     <string name="patch_selection_option_hint_number">숫자</string>
     <string name="patch_selection_option_hint_text">텍스트</string>
+    <string name="patch_option_recommended_size">권장: %1$dx%2$d</string>
+    <string name="patch_option_list_empty">값을 비워 둘 수 없습니다</string>
+    <string name="patch_option_list_duplicate">이미 목록에 있는 항목입니다</string>
+    <string name="patch_option_list_empty_state">아직 추가된 항목이 없습니다</string>
+    <string name="patch_option_enter_value">값 입력…</string>
+    <string name="patch_option_add_item">항목 추가</string>
+    <string name="patch_option_edit_list">목록 편집</string>
     <string name="patch_selection_run_info_title">이번 실행</string>
     <string name="patch_selection_run_info_app_group">앱</string>
     <string name="patch_selection_run_info_bundles_group">패치 번들</string>
@@ -432,10 +439,10 @@
     <string name="patching_log_viewer_failed_to_read">로그 파일을 읽지 못했습니다: %1$s</string>
     <string name="patching_log_viewer_title">로그 파일</string>
     <string name="patching_log_viewer_copy_all">모두 복사</string>
-    <string name="patching_progress_title">앱 패치</string>
     <string name="patching_step_all_done">모두 완료!</string>
     <string name="patching_step_waiting">대기 중…</string>
     <string name="patching_graph_memory_usage">메모리 사용량</string>
+    <string name="patching_graph_memory_detail">%2$d MB 중 %1$d%%</string>
     <string name="patching_graph_storage_io">저장소 I/O</string>
     <string name="patching_graph_cpu_usage">CPU 사용량</string>
     <string name="patching_banner_started_title">패치 시작</string>
@@ -561,7 +568,7 @@
     <string name="source_error_no_repository">소스에 대해 구성된 저장소가 없습니다</string>
     <string name="source_error_fetch_releases">릴리스를 가져올 수 없습니다</string>
     <string name="source_error_failed_to_load">불러오기 실패</string>
-    <string name="source_error_github_pat_required">풀 리퀘스트 소스를 다운로드하려면 GitHub PAT가 필요합니다.</string>
+    <string name="source_error_github_pat_required">Pull requests 소스를 다운로드하려면 GitHub PAT가 필요합니다</string>
     <string name="source_error_pr_no_artifact">Pull request에 대한 아티팩트를 찾을 수 없습니다</string>
     <string name="source_sheet_manage_description">패치 소스 관리</string>
     <string name="source_sheet_local_label">로컬</string>
@@ -694,7 +701,7 @@
     <string name="settings_theme_dark">어두운</string>
     <string name="settings_theme_amoled">Amoled</string>
     <string name="settings_toggle_sharp_corners_label">날카로운 모서리</string>
-    <string name="settings_toggle_sharp_corners_desc">카드, 대화상자, 버튼의 모서리를 각지게 만듭니다</string>
+    <string name="settings_toggle_sharp_corners_desc">카드, 대화 상자, 버튼의 모서리를 각지게 만듭니다</string>
     <string name="settings_section_accent_color">강조 색상</string>
     <string name="settings_accent_clear_description">강조 색상 지우기</string>
     <string name="settings_accent_custom_description">사용자 지정 강조 색상</string>
